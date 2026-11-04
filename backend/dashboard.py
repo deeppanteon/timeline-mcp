@@ -20,7 +20,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import requests
 from starlette.applications import Starlette
@@ -47,6 +47,7 @@ WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 HOSTNAME = "timeline.localhost"
 ALLOWED_HOSTS = ["127.0.0.1", "localhost", HOSTNAME]
 MAX_STATUS_IDS = 100
+MAX_GUARD_IDS = 60  # extra tickets (planner, watchlist, workflows) looked up for the PR guard
 # Polling is tiered so it feels live without spikes. Every HEARTBEAT the `now`
 # planner period (1 request) and the watched tasks' timelines (1 each) are read;
 # the full planner check (3 periods) runs when the heartbeat sees `now` change, or
@@ -147,6 +148,8 @@ def create_app(
     work_launcher: Any = None,
     planner_cache: Optional[PlannerCache] = None,
     claude_home: Optional[str] = None,
+    pr_runner: Any = None,
+    pos_dir: Optional[str] = None,
 ) -> Starlette:
     """
     Builds the app. `user_id` and `base_dir` work as in fetch_my_day;
@@ -155,9 +158,12 @@ def create_app(
     `work_launcher` are swappable for tests; the work config is re-read on
     every request, so edits to timeline-desk.json need no restart.
     `claude_home` is where Claude Code keeps its session logs (default
-    ~/.claude), read for a run's conversation.
+    ~/.claude), read for a run's conversation. `pr_runner` replaces the
+    git/gh runner of the PR draft and create endpoints for tests. `pos_dir`
+    is the duell-pos checkout (default: DUELL_POS_DIR, then ../duell-pos).
     """
     git_kwargs = {"runner": work_runner} if work_runner else {}
+    pr_kwargs = {"runner": pr_runner} if pr_runner else {}
     start_kwargs = {**git_kwargs, **({"launcher": work_launcher} if work_launcher else {})}
     release = {"report": None, "lock": threading.Lock()}
     planners = planner_cache or PlannerCache()
@@ -269,10 +275,82 @@ def create_app(
             with release["lock"]:
                 release["report"] = release_builder(
                     repo_dir=repo_dir,
+                    pos_dir=pos_dir,
                     status_lookup=lambda ids: panteon_client.get_task_statuses(ids, headers()),
+                    extra_ids=guard_candidates(),
+                    project_ok=guard_project_ok(),
+                    only_mine=True,
                 )
             return {"report": release["report"]}
         return _respond(build)
+
+    def guard_candidates() -> List[str]:
+        """The user's own tickets, whose stage should match their PRs: planner, watchlist (watched), active workflows."""
+        ids: List[str] = []
+        try:
+            overview = panteon_client.planner_overview(
+                planners.get(lambda: panteon_client.fetch_all_planners(headers())), resolved_user())
+            ids += [str(t["issue_number"]) for period in overview["periods"].values() for t in period["tasks"]
+                    if t.get("issue_number")]
+        except Exception:  # no planner (auth, network): the watchlist and workflows still count
+            pass
+        ids += [str(w["issue_number"]) for w in task_events.list_watchlist(base_dir, active_only=True)]
+        ids += [str(w["issue"]) for w in workflow.list_workflows(base_dir, None) if w["state"] == "active"]
+        return list(dict.fromkeys(ids))[:MAX_GUARD_IDS]
+
+    def guard_project_ok() -> Callable[[Any], bool]:
+        """Only duell-admin tickets have PRs here; the repo's Timeline project id is in timeline-desk.json."""
+        name = release_check.REPO.split("/")[1]
+        wanted = {str(repo["id"]) for repo in work_config()["repos"].values() if repo.get("id") and repo["name"] == name}
+        return lambda project_id: str(project_id) in wanted
+
+    def api_pr_guard(request: Request):
+        report = release["report"]
+        return JSONResponse({"guard": report.get("guard") if report else None,
+                             "generated_at": report.get("generated_at") if report else None})
+
+    def repo_args(name: Any) -> Dict[str, Any]:
+        """Which checkout a PR endpoint works in: duell-admin (default) or duell-pos."""
+        name = name or release_check.ADMIN
+        if name not in release_check.REPO_SPECS:
+            raise ValueError(f"Unknown repository: {name!r}.")
+        return {"repo_dir": pos_dir if name == release_check.POS else repo_dir, "repo_name": name}
+
+    def api_pr_draft(request: Request):
+        params = request.query_params
+
+        def draft():
+            where = repo_args(params.get("repo"))
+            return release_check.draft_pr(where["repo_dir"], params.get("issue"), params.get("base"),
+                                          params.get("title") or "", repo_name=where["repo_name"], **pr_kwargs)
+        return _respond(draft)
+
+    async def api_pr_describe(request: Request):
+        # Runs `claude -p` (your Claude usage), so it is a POST with the header guard like the other actions.
+        denied = guarded(request)
+        if denied:
+            return denied
+        body = await json_body(request)
+
+        def describe():
+            where = repo_args(body.get("repo"))
+            return release_check.ai_pr_body(
+                where["repo_dir"], body.get("issue"), body.get("base"), body.get("head"), str(body.get("title") or ""),
+                claude=work_config()["claude"], repo_name=where["repo_name"], **pr_kwargs)
+        return await run_in_threadpool(_respond, describe)
+
+    async def api_pr_create(request: Request):
+        denied = guarded(request)
+        if denied:
+            return denied
+        body = await json_body(request)
+
+        def create():
+            where = repo_args(body.get("repo"))
+            return release_check.create_pr(
+                where["repo_dir"], body.get("issue"), body.get("base"), body.get("head"), body.get("title"), body.get("body"),
+                repo_name=where["repo_name"], **pr_kwargs)
+        return await run_in_threadpool(_respond, create)
 
     def guarded(request: Request) -> Optional[JSONResponse]:
         if request.headers.get("x-timeline-desk") != "1":
@@ -528,9 +606,11 @@ def create_app(
             return denied
 
         def unwatch():
-            if not task_events.unwatch_task(request.path_params["issue"], base_dir):
+            issue = request.path_params["issue"]
+            events = next((w["events"] for w in task_events.list_watchlist(base_dir) if w["issue_number"] == issue), 0)
+            if not task_events.unwatch_task(issue, base_dir):
                 raise LookupError("That task isn't being watched.")
-            return {"watchlist": task_events.list_watchlist(base_dir)}
+            return {"deleted_events": events, "watchlist": task_events.list_watchlist(base_dir)}
         return _respond(unwatch)
 
     # ---- Jira board (jira_board.py) ----
@@ -541,8 +621,28 @@ def create_app(
                                               resolved_user(), base_dir)
             except (PermissionError, LookupError, ValueError, requests.RequestException):
                 pass
-            return jira_board.board(base_dir)
+            data = jira_board.board(base_dir)
+            closed = closed_issues([c["issue_number"] for c in data["cards"]])
+            for card in data["cards"]:
+                card["closed"] = card["issue_number"] in closed
+            return data
         return _respond(load)
+
+    closed_cache: Dict[str, Any] = {}  # issue -> (checked_at, is_closed); a closed task rarely reopens
+
+    def closed_issues(issues):
+        """The issues Timeline reports as closed (task_status), one taskbyissue call each, remembered for 10 minutes.
+        Best effort: a Timeline failure just means no closed pill."""
+        now = time.time()
+        stale = [i for i in issues if i not in closed_cache or now - closed_cache[i][0] > 600]
+        if stale:
+            try:
+                for row in panteon_client.get_task_statuses(stale, headers()):
+                    if not row.get("error"):
+                        closed_cache[str(row["issue_id"])] = (now, row.get("task_status") == "closed")
+            except (PermissionError, LookupError, ValueError, requests.RequestException):
+                pass
+        return {i for i in issues if closed_cache.get(i, (0, False))[1]}
 
     def jira_projects():
         return work_session.public_config(work_config())["projects"]
@@ -637,6 +737,10 @@ def create_app(
         Route("/api/attachment/{name}", storage_proxy("attachments")),
         Route("/api/release", api_release),
         Route("/api/release", api_release_refresh, methods=["POST"]),
+        Route("/api/pr-guard", api_pr_guard),
+        Route("/api/pr/draft", api_pr_draft),
+        Route("/api/pr/describe", api_pr_describe, methods=["POST"]),
+        Route("/api/pr/create", api_pr_create, methods=["POST"]),
         Route("/api/project/{project}/tasks", api_project_tasks),
         Route("/api/about", api_about),
         Route("/api/work/config", api_work_config),
@@ -746,6 +850,7 @@ def main(argv=None) -> int:
     parser.add_argument("--port", type=int, default=8765, help="Port on 127.0.0.1 (default 8765).")
     parser.add_argument("--user-id", default=None, help="Planner user id; defaults to PANTEON_USER_ID, then the bearer token's `sub`.")
     parser.add_argument("--repo-dir", default=None, help="duell-admin checkout for the Release view; defaults to DUELL_ADMIN_DIR, then ../duell-admin.")
+    parser.add_argument("--pos-dir", default=None, help="duell-pos checkout for the PR guard; defaults to DUELL_POS_DIR, then ../duell-pos.")
     parser.add_argument("--base-dir", default=None, help="Where database/timeline_task.db (the planner snapshots) lives; defaults to PANTEON_TIMELINE_DIR or the current directory.")
     parser.add_argument("--interval", type=float, default=float(os.getenv("TIMELINE_SNAPSHOT_MINUTES") or DEFAULT_SNAPSHOT_MINUTES),
                         help=f"Most minutes between full planner checks (default {DEFAULT_SNAPSHOT_MINUTES}, or TIMELINE_SNAPSHOT_MINUTES).")
@@ -806,7 +911,7 @@ def main(argv=None) -> int:
         "active_hours": parse_active_hours(args.active_hours),
     }).start()
     try:
-        uvicorn.run(create_app(args.user_id, args.base_dir, args.repo_dir, planner_cache=planner_cache), host="127.0.0.1", port=args.port, log_level="warning")
+        uvicorn.run(create_app(args.user_id, args.base_dir, args.repo_dir, planner_cache=planner_cache, pos_dir=args.pos_dir), host="127.0.0.1", port=args.port, log_level="warning")
     finally:
         stop.set()
         wake.set()

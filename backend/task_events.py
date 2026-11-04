@@ -25,7 +25,7 @@ import requests
 
 import panteon_client as pc
 
-EVENT_KINDS = ("comment", "status", "field", "commit")
+EVENT_KINDS = ("created", "comment", "status", "field", "commit")
 MAX_EVENTS_PAGE = 500
 SYNC_WORKERS = 4
 
@@ -89,6 +89,25 @@ def parse_event(item: Dict[str, Any], issue_number: Any) -> Optional[Dict[str, A
     }
 
 
+def created_event(meta: Dict[str, Any], task_id: Any, issue_number: Any) -> Optional[Dict[str, Any]]:
+    """
+    The task's creation as a `created` row carrying its description. Timeline's
+    timeline doesn't list the creation, so a task nobody has touched yet would
+    show nothing. The id is `-task_id` (never a Timeline event id; sorts before
+    anything else at the same minute).
+    """
+    when = parse_event_time(meta.get("created_at"))
+    if not when or not isinstance(task_id, int):
+        return None
+    return {
+        "id": -task_id, "issue_number": str(issue_number), "occurred_at": when, "kind": "created",
+        "field_name": "Created", "old_value": None, "new_value": None,
+        "employee": meta.get("creator") or None, "photo": None,
+        "body": (meta.get("description") or "").strip() or None, "url": None,
+        "raw": json.dumps({"title": meta.get("title"), "created_at": meta.get("created_at")}, ensure_ascii=False),
+    }
+
+
 # --------------------------------------------------------------------------- #
 # Watchlist
 # --------------------------------------------------------------------------- #
@@ -136,14 +155,15 @@ def watch_task(issue: Any, code: Any = None, title: str = "", base_dir: Optional
 
 
 def unwatch_task(issue: Any, base_dir: Optional[str] = None) -> bool:
-    """Stops syncing a task. Its stored events stay, so its history isn't lost."""
+    """Stops watching a task: removes it from the watchlist and deletes its stored events."""
     issue = _issue(issue)
     conn = pc._open_planner_db(base_dir, create=False)
     if conn is None:
         return False
     try:
-        changed = conn.execute("UPDATE watchlist SET active = 0 WHERE issue_number = ? AND active = 1", (issue,)).rowcount
-        conn.commit()
+        with conn:
+            changed = conn.execute("DELETE FROM watchlist WHERE issue_number = ?", (issue,)).rowcount
+            conn.execute("DELETE FROM task_events WHERE issue_number = ?", (issue,))
     finally:
         conn.close()
     return bool(changed)
@@ -169,7 +189,7 @@ def iter_my_open_tasks(headers: Dict[str, str], projects: Iterable[Dict[str, Any
 def _fetch_one(row: Dict[str, Any], headers: Dict[str, str], refresh_meta: bool = True) -> Dict[str, Any]:
     issue = row["issue_number"]
     try:
-        if refresh_meta or not row.get("task_id"):
+        if refresh_meta or not row.get("task_id") or not row.get("has_created"):
             raw = pc.get_task_by_issue(issue, headers)
             meta = pc.extract_task_meta(raw)
             task_id = pc.extract_task_id_from_data(raw)
@@ -200,6 +220,15 @@ def sync_watchlist(headers: Dict[str, str], base_dir: Optional[str] = None, issu
     """
     wanted = {_issue(i) for i in issues} if issues is not None else None
     rows = [r for r in list_watchlist(base_dir, active_only=True) if wanted is None or r["issue_number"] in wanted]
+    if rows:  # a task without its creation row is fetched in full once (it also fixes tasks watched earlier)
+        conn = pc._open_planner_db(base_dir, create=False)
+        if conn is not None:
+            try:
+                have = {r[0] for r in conn.execute("SELECT issue_number FROM task_events WHERE kind = 'created'")}
+            finally:
+                conn.close()
+            for r in rows:
+                r["has_created"] = r["issue_number"] in have
     result: Dict[str, Any] = {"tasks": len(rows), "new_events": 0, "errors": {}, "paused": []}
     if not rows:
         return result
@@ -215,8 +244,8 @@ def sync_watchlist(headers: Dict[str, str], base_dir: Optional[str] = None, issu
                 conn.execute("UPDATE watchlist SET last_error = ? WHERE issue_number = ?", (got["error"], issue))
                 continue
             before = conn.total_changes
-            for item in got["items"]:
-                event = parse_event(item, issue)
+            created = created_event(got["meta"], got["task_id"], issue) if got["meta"] else None
+            for event in [created] + [parse_event(item, issue) for item in got["items"]]:
                 if event:
                     conn.execute(
                         "INSERT OR IGNORE INTO task_events (id, issue_number, occurred_at, kind, field_name, old_value, "
@@ -272,7 +301,7 @@ def list_events(base_dir: Optional[str] = None, issues: Optional[Iterable[Any]] 
         where.append(f"kind IN ({','.join('?' * len(kinds))})")
         args += kinds
     if before:
-        cursor = re.fullmatch(r"(\d{4}-\d{2}-\d{2}T[\d:]{8})\|(\d+)", before)
+        cursor = re.fullmatch(r"(\d{4}-\d{2}-\d{2}T[\d:]{8})\|(-?\d+)", before)
         if not cursor:
             raise ValueError("Bad cursor.")
         where.append("(occurred_at < ? OR (occurred_at = ? AND id < ?))")

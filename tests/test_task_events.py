@@ -36,7 +36,8 @@ def fake_api(monkeypatch):
         state["calls"].append(("task", issue))
         if issue == "404":
             raise requests.HTTPError(response=type("R", (), {"status_code": 422})())
-        return {"data": {"task_id": int(issue) + 1000, "issue_number": int(issue), "title": f"Task {issue}", "task_status": state["status"]}}
+        return {"data": {"task_id": int(issue) + 1000, "issue_number": int(issue), "title": f"Task {issue}", "task_status": state["status"],
+                         "created_at_string": "20.06.2026 09:00", "description": "Spec", "task_creator": {"name": "Ola"}}}
 
     def timeline(task_id, headers):
         state["calls"].append(("timeline", task_id))
@@ -75,12 +76,21 @@ class TestSync:
         base = str(tmp_path)
         te.watch_task(5, "15033", "Five", base, now=NOW)
         first = te.sync_watchlist({}, base, now=NOW)
-        assert first["new_events"] == 4 and first["errors"] == {}
+        assert first["new_events"] == 5 and first["errors"] == {}
         assert te.sync_watchlist({}, base, now=NOW)["new_events"] == 0
         fake_api["items"].append(_item(5, "Comment Added", "27.10.2026 10:00", task_comment={"description": "hi"}))
         assert te.sync_watchlist({}, base, now=NOW)["new_events"] == 1
         row = te.list_watchlist(base)[0]
-        assert row["events"] == 5 and row["title"] == "Task 5" and row["last_synced_at"] == "2026-10-27T12:00:00"
+        assert row["events"] == 6 and row["title"] == "Task 5" and row["last_synced_at"] == "2026-10-27T12:00:00"
+
+    def test_creation_with_description_is_the_first_event(self, fake_api, tmp_path):
+        base = str(tmp_path)
+        fake_api["items"].clear()                       # a task nobody has touched yet
+        te.watch_task(5, "15033", "Five", base, now=NOW)
+        te.sync_watchlist({}, base, now=NOW)
+        (e,) = te.list_events(base)["events"]
+        assert (e["kind"], e["body"], e["employee"], e["occurred_at"]) == ("created", "Spec", "Ola", "2026-06-20T09:00:00")
+        assert te.sync_watchlist({}, base, now=NOW)["new_events"] == 0
 
     def test_known_task_skips_taskbyissue_unless_meta_is_refreshed(self, fake_api, tmp_path):
         base = str(tmp_path)
@@ -109,7 +119,7 @@ class TestSync:
         fake_api["status"] = "closed"
         te.watch_task(5, None, "", str(tmp_path), now=NOW)
         result = te.sync_watchlist({}, str(tmp_path), now=NOW)
-        assert result["paused"] == ["5"] and result["new_events"] == 4
+        assert result["paused"] == ["5"] and result["new_events"] == 5
         row = te.list_watchlist(str(tmp_path))[0]
         assert row["active"] is False and row["last_error"] == "Task is closed"
         assert te.sync_watchlist({}, str(tmp_path), now=NOW)["tasks"] == 0
@@ -118,13 +128,15 @@ class TestSync:
         for i in (404, 5):
             te.watch_task(i, None, "", str(tmp_path), now=NOW)
         result = te.sync_watchlist({}, str(tmp_path), now=NOW)
-        assert result["errors"] == {"404": "not found in Timeline"} and result["new_events"] == 4
+        assert result["errors"] == {"404": "not found in Timeline"} and result["new_events"] == 5
 
-    def test_unwatch_keeps_events(self, fake_api, tmp_path):
+    def test_unwatch_deletes_task_and_events(self, fake_api, tmp_path):
         te.watch_task(5, None, "", str(tmp_path), now=NOW)
         te.sync_watchlist({}, str(tmp_path), now=NOW)
         assert te.unwatch_task(5, str(tmp_path)) is True
-        assert len(te.list_events(str(tmp_path))["events"]) == 4
+        assert te.list_events(str(tmp_path))["events"] == []
+        assert te.list_watchlist(str(tmp_path)) == []
+        assert te.unwatch_task(5, str(tmp_path)) is False
 
 
 class TestListEvents:
@@ -155,7 +167,7 @@ class TestListEvents:
             cursor = page["next"]
             if not cursor:
                 break
-        assert len(seen) == len(set(seen)) == 8
+        assert len(seen) == len(set(seen)) == 10
 
     def test_bad_cursor_and_empty_db(self, base, tmp_path):
         with pytest.raises(ValueError):
@@ -202,10 +214,10 @@ class TestDashboard:
 
     def test_watch_backfills_and_feed_reads(self, client):
         body = client.post("/api/watchlist", json={"issue": "5"}, headers=self.G).json()
-        assert body["sync"]["new_events"] == 4 and body["watchlist"][0]["issue_number"] == "5"
+        assert body["sync"]["new_events"] == 5 and body["watchlist"][0]["issue_number"] == "5"
         feed = client.get("/api/events?kinds=comment,status").json()
         assert [e["kind"] for e in feed["events"]] == ["status", "comment"] or {e["kind"] for e in feed["events"]} == {"status", "comment"}
-        assert feed["watchlist"][0]["events"] == 4
+        assert feed["watchlist"][0]["events"] == 5
         assert client.delete("/api/watchlist/5", headers=self.G).status_code == 200
         assert client.delete("/api/watchlist/5", headers=self.G).status_code == 404
 
@@ -218,9 +230,9 @@ def test_events_marker_changes_when_events_are_stored(fake_api, tmp_path):
     te.watch_task(5, "15033", "Five", base, now=NOW)
     te.sync_watchlist({}, base, now=NOW)
     before = te.events_marker(base)
-    assert before["count"] == 4
+    assert before["count"] == 5
     assert te.events_marker(base) == before  # unchanged while nothing is stored
     fake_api["items"].append(_item(5, "Comment Added", "27.10.2026 10:00", task_comment={"description": "hi"}))
     te.sync_watchlist({}, base, now=NOW)
     after = te.events_marker(base)
-    assert after["count"] == 5 and after["max_id"] > before["max_id"]
+    assert after["count"] == 6 and after["max_id"] > before["max_id"]

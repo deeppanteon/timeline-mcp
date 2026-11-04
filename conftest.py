@@ -1,7 +1,12 @@
-# Presence of this file at the project root puts the root on sys.path for pytest,
-# so tests under tests/ can `import panteon_client` without packaging the project.
+# The Python modules live in backend/; put it on sys.path so tests under tests/ can
+# `import panteon_client` without packaging the project.
+
+import os
+import sys
 
 import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "backend"))
 
 
 @pytest.fixture(autouse=True)

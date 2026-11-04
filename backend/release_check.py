@@ -33,7 +33,7 @@ class ReleaseCheckError(RuntimeError):
 
 def default_repo_dir() -> str:
     """DUELL_ADMIN_DIR, else a duell-admin checkout next to this project."""
-    here = os.path.dirname(os.path.abspath(__file__))
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # the project root
     return os.environ.get("DUELL_ADMIN_DIR") or os.path.join(os.path.dirname(here), "duell-admin")
 
 

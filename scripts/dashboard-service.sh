@@ -29,7 +29,7 @@ After=network-online.target
 
 [Service]
 WorkingDirectory=$REPO
-ExecStart="$PYTHON" "$REPO/dashboard.py" --port $PORT
+ExecStart="$PYTHON" "$REPO/backend/dashboard.py" --port $PORT
 Restart=on-failure
 RestartSec=5
 

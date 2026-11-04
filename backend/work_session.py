@@ -26,7 +26,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from release_check import ReleaseCheckError, Runner, _subprocess_runner
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # the project root (backend/ is one level down)
 CONFIG_NAME = "timeline-desk.json"
 # The timeline MCP server every run gets from the desk itself (--mcp-config), under
 # its own name: a project can disable "timeline-mcp" (duell-admin does), and Claude
@@ -343,7 +343,7 @@ def desk_python() -> str:
 
 def mcp_server(repo: Dict[str, Any]) -> Dict[str, Any]:
     """The timeline MCP server for a run in `repo`: task.md goes to the main checkout's timeline/."""
-    return {"type": "stdio", "command": desk_python(), "args": [os.path.join(HERE, "server.py")],
+    return {"type": "stdio", "command": desk_python(), "args": [os.path.join(HERE, "backend", "server.py")],
             "env": {"PANTEON_TIMELINE_DIR": repo["path"]}}
 
 

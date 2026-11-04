@@ -17,9 +17,9 @@ Unit tests live in `tests/` (`test_panteon_client.py`). Add tests there when int
 
 - `pip install -r requirements.txt` installs FastMCP, Requests, and dotenv support.
 - `pip install -r requirements-dev.txt` additionally installs pytest for the test suite.
-- `python3 server.py` runs the MCP server over stdio for local MCP client integration.
-- `python3 fetch_task.py <url-or-id>` fetches a single task from the shell (add `--print` to echo the markdown).
-- `python3 -m py_compile server.py panteon_client.py fetch_task.py` performs a quick syntax check.
+- `python3 backend/server.py` runs the MCP server over stdio for local MCP client integration.
+- `python3 backend/fetch_task.py <url-or-id>` fetches a single task from the shell (add `--print` to echo the markdown).
+- `python3 -m py_compile backend/server.py backend/panteon_client.py backend/fetch_task.py` performs a quick syntax check.
 - `pytest` runs the unit tests (no network or credentials required).
 
 Authentication is required for real API calls. Use `PANTEON_BEARER_TOKEN` or `PANTEON_COOKIE` in `.env`, or pass credentials through the MCP tool arguments.

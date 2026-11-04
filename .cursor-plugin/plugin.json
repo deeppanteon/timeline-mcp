@@ -13,7 +13,7 @@
         "--with-requirements",
         "${CURSOR_PLUGIN_ROOT}/requirements.txt",
         "python",
-        "${CURSOR_PLUGIN_ROOT}/server.py"
+        "${CURSOR_PLUGIN_ROOT}/backend/server.py"
       ],
       "env": {
         "PANTEON_BEARER_TOKEN": "${PANTEON_BEARER_TOKEN}"

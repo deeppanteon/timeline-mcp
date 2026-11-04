@@ -11,7 +11,7 @@
         "--with-requirements",
         "${extensionPath}${/}requirements.txt",
         "python",
-        "${extensionPath}${/}server.py"
+        "${extensionPath}${/}backend${/}server.py"
       ]
     }
   },

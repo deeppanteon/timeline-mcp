@@ -41,7 +41,7 @@ import timeline_socket
 import work_session
 import workflow
 
-WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
 # *.localhost names resolve to loopback without /etc/hosts (RFC 6761), so
 # timeline.localhost works out of the box in browsers and systemd-resolved.
 HOSTNAME = "timeline.localhost"

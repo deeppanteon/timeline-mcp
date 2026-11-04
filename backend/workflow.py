@@ -40,7 +40,7 @@ import task_events
 import work_session
 from release_check import Runner, _subprocess_runner
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # the project root (backend/ is one level down)
 SKILLS_DIR = os.path.join(HERE, "skills")
 MAX_RESULT_BYTES = 200_000
 MAX_DOC_BYTES = 1_000_000
@@ -166,7 +166,7 @@ SKILLS_NOTE = (f"The skills named here, and the ones they hand work to, are in {
 
 
 def _mcp_note(repo: Dict[str, Any], issue: str) -> str:
-    cli = f"{work_session.desk_python()} {os.path.join(HERE, 'fetch_task.py')}"
+    cli = f"{work_session.desk_python()} {os.path.join(HERE, 'backend', 'fetch_task.py')}"
     return (f"The timeline tools here are mcp__{MCP}__* (the skills call them mcp__timeline-mcp__*). If they aren't "
             f"available, use the CLI instead: `{cli} {issue} --base-dir {repo['path']}` writes timeline/{issue}/task.md, "
             f"and `{cli} --status {issue}` prints the stages.")

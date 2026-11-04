@@ -14,33 +14,35 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-dev.txt   # adds pytest on top of runtime deps
 
 # Run the MCP server over stdio
-.venv/bin/python server.py
+.venv/bin/python backend/server.py
 
 # Run the CLI fetcher directly
-.venv/bin/python fetch_task.py --planner                # your priority tasks
-.venv/bin/python fetch_task.py --changes                # planner changes since last saved day
-.venv/bin/python fetch_task.py --my-day                 # daily brief
-.venv/bin/python fetch_task.py --status 4054 5627       # workflow stage / QA approval
-.venv/bin/python fetch_task.py 5461
-.venv/bin/python fetch_task.py "https://timeline.panteon.no/tasks#/list/15033/edit/5461" --print
-.venv/bin/python fetch_task.py 5461 --base-dir /path/to/project
+.venv/bin/python backend/fetch_task.py --planner                # your priority tasks
+.venv/bin/python backend/fetch_task.py --changes                # planner changes since last saved day
+.venv/bin/python backend/fetch_task.py --my-day                 # daily brief
+.venv/bin/python backend/fetch_task.py --status 4054 5627       # workflow stage / QA approval
+.venv/bin/python backend/fetch_task.py 5461
+.venv/bin/python backend/fetch_task.py "https://timeline.panteon.no/tasks#/list/15033/edit/5461" --print
+.venv/bin/python backend/fetch_task.py 5461 --base-dir /path/to/project
 
 # Tests (no network or credentials required — requests.get is mocked)
 .venv/bin/python -m pytest
 .venv/bin/python -m pytest tests/test_panteon_client.py::test_name   # single test
 
 # Local dashboard (http://timeline.localhost:8765)
-.venv/bin/python dashboard.py
+.venv/bin/python backend/dashboard.py
 scripts/dashboard-service.sh install|restart|status|uninstall   # always-on systemd user service
 
 # Quick syntax check
-.venv/bin/python -m py_compile server.py panteon_client.py fetch_task.py dashboard.py release_check.py work_session.py workflow.py task_events.py
+.venv/bin/python -m py_compile backend/server.py backend/panteon_client.py backend/fetch_task.py backend/dashboard.py backend/release_check.py backend/work_session.py backend/workflow.py backend/task_events.py
 node --check web/app.js
 ```
 
 There is no separate lint/format command configured in this repo.
 
 ## Architecture
+
+All Python lives in `backend/` (`panteon_client.py`, `server.py`, `fetch_task.py`, `dashboard.py`, `workflow.py`, `work_session.py`, `release_check.py`, `task_events.py`, `timeline_socket.py`, `jira_board.py`). Everything else stays at the project root: `web/`, `skills/`, `tests/` (`conftest.py` puts `backend/` on `sys.path`), `scripts/`, the plugin manifests, `.env`, `timeline-desk.json`, `logs/`, `database/` and `timeline/`. Modules that locate those root files (`.env`, `logs/`, `web/`, `skills/`, `timeline-desk.json`, `.venv`) step one directory up from `backend/`.
 
 Three files carry all the logic; keep the same separation when adding to them:
 

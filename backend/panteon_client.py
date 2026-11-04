@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 # with the cwd set to whatever project you're in). Variables already present in
 # the environment — e.g. those set in the MCP registration — are NOT overridden.
 # Falls back to the default cwd-based search when there is no local .env.
-_ENV_PATH = Path(__file__).resolve().parent / ".env"
+_ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(_ENV_PATH if _ENV_PATH.exists() else None)
 
 BASE_URL = "https://timeline.panteon.no"
@@ -56,7 +56,7 @@ def _pace() -> None:
 def request_log_dir() -> Path:
     """Folder for the daily request logs: PANTEON_REQUEST_LOG_DIR, else `logs/` next to
     this module, so the MCP server, CLI and dashboard all write to the same place."""
-    return Path(os.environ.get("PANTEON_REQUEST_LOG_DIR") or Path(__file__).resolve().parent / "logs")
+    return Path(os.environ.get("PANTEON_REQUEST_LOG_DIR") or Path(__file__).resolve().parent.parent / "logs")
 
 
 def log_request(method: str, url: str, status: Optional[int], started: float, error: str = "") -> None:

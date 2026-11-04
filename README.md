@@ -55,7 +55,7 @@ Add the following configuration to your MCP server configuration file (e.g., `cl
     "timeline-mcp": {
       "command": "/path/to/timeline-mcp/.venv/bin/python",
       "args": [
-        "/path/to/timeline-mcp/server.py"
+        "/path/to/timeline-mcp/backend/server.py"
       ],
       "env": {
         "PANTEON_BEARER_TOKEN": "your_jwt_token_here"
@@ -71,7 +71,7 @@ Codex reads MCP servers from `config.toml`. Add this to `~/.codex/config.toml` f
 ```toml
 [mcp_servers.timeline_mcp]
 command = "/path/to/timeline-mcp/.venv/bin/python"
-args = ["/path/to/timeline-mcp/server.py"]
+args = ["/path/to/timeline-mcp/backend/server.py"]
 cwd = "/path/to/timeline-mcp"
 startup_timeout_sec = 20
 tool_timeout_sec = 120
@@ -135,14 +135,14 @@ Everything is per person: your own token, your own planner, your own paths. Noth
 **Core (all platforms)** — MCP tools, `fetch_task.py`, skills:
 1. Clone, then create the venv and install dependencies (see Installation & Setup above).
 2. `cp .env.example .env` and paste your own Timeline token.
-3. Check it: `.venv/bin/python fetch_task.py --planner`.
+3. Check it: `.venv/bin/python backend/fetch_task.py --planner`.
 4. Register the server once (user scope, so it works from any project):
    ```bash
-   claude mcp add timeline-mcp -s user -- "$PWD/.venv/bin/python" "$PWD/server.py"
+   claude mcp add timeline-mcp -s user -- "$PWD/.venv/bin/python" "$PWD/backend/server.py"
    ```
    Or install it as a plugin (see "Install as a Claude Code plugin" below) to get the skills too.
 
-**Dashboard** — Board, Changes and Task view work right away: `.venv/bin/python dashboard.py`, then open http://timeline.localhost:8765.
+**Dashboard** — Board, Changes and Task view work right away: `.venv/bin/python backend/dashboard.py`, then open http://timeline.localhost:8765.
 
 | Extra | Needs |
 |---|---|
@@ -227,13 +227,13 @@ scripts/dashboard-service.sh status      # state and recent log lines
 scripts/dashboard-service.sh uninstall   # stop and remove it
 ```
 
-The service runs the code in this checkout. There is no build step: after editing `web/` files just reload the page (they're served with `Cache-Control: no-cache`); after editing Python files run `scripts/dashboard-service.sh restart`. Keep a branch checked out that has `dashboard.py`. Use `TIMELINE_DESK_PORT=9000 scripts/dashboard-service.sh install` for another port.
+The service runs the code in this checkout. There is no build step: after editing `web/` files just reload the page (they're served with `Cache-Control: no-cache`); after editing Python files run `scripts/dashboard-service.sh restart`. Keep a branch checked out that has `backend/dashboard.py`. Use `TIMELINE_DESK_PORT=9000 scripts/dashboard-service.sh install` for another port.
 
 **One-off:**
 
 ```bash
-.venv/bin/python dashboard.py            # then open http://timeline.localhost:8765
-.venv/bin/python dashboard.py --port 9000 --user-id 135
+.venv/bin/python backend/dashboard.py            # then open http://timeline.localhost:8765
+.venv/bin/python backend/dashboard.py --port 9000 --user-id 135
 ```
 
 | View | Shows |
@@ -299,29 +299,29 @@ The same fetch logic is available from the shell via `fetch_task.py` (credential
 
 ```bash
 # By numeric ID or full URL
-.venv/bin/python fetch_task.py 5461
-.venv/bin/python fetch_task.py "https://timeline.panteon.no/tasks#/list/15033/edit/5461"
+.venv/bin/python backend/fetch_task.py 5461
+.venv/bin/python backend/fetch_task.py "https://timeline.panteon.no/tasks#/list/15033/edit/5461"
 
 # Also print the rendered markdown to stdout
-.venv/bin/python fetch_task.py 5461 --print
+.venv/bin/python backend/fetch_task.py 5461 --print
 
 # Write under a specific project root instead of PANTEON_TIMELINE_DIR / cwd
-.venv/bin/python fetch_task.py 5461 --base-dir /path/to/project
+.venv/bin/python backend/fetch_task.py 5461 --base-dir /path/to/project
 
 # Your priority tasks from the employee planner
-.venv/bin/python fetch_task.py --planner
-.venv/bin/python fetch_task.py --planner --period next        # or: commingup
-.venv/bin/python fetch_task.py --planner --user-id 135
+.venv/bin/python backend/fetch_task.py --planner
+.venv/bin/python backend/fetch_task.py --planner --period next        # or: commingup
+.venv/bin/python backend/fetch_task.py --planner --user-id 135
 
 # Planner changes since the last saved day (also saves today's snapshot)
-.venv/bin/python fetch_task.py --changes
-.venv/bin/python fetch_task.py --changes --no-save
+.venv/bin/python backend/fetch_task.py --changes
+.venv/bin/python backend/fetch_task.py --changes --no-save
 
 # Daily brief: now + soon-due next + changes (one fetch per planner period)
-.venv/bin/python fetch_task.py --my-day
+.venv/bin/python backend/fetch_task.py --my-day
 
 # Workflow stage / QA approval of several tasks
-.venv/bin/python fetch_task.py --status 4054 5627 6027
+.venv/bin/python backend/fetch_task.py --status 4054 5627 6027
 ```
 
 ---

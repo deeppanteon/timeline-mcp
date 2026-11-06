@@ -423,3 +423,102 @@ def test_project_endpoint_only_serves_configured_projects(monkeypatch, tmp_path)
 def test_events_marker_endpoint(tmp_path):
     client = TestClient(dashboard.create_app(None, str(tmp_path)), base_url="http://127.0.0.1")
     assert client.get("/api/events/marker").json() == {"max_id": 0, "count": 0}
+
+
+class TestCoverage:
+    """GET /api/coverage reads the cache only; POST rebuilds through the (faked) builder, guarded by the header."""
+
+    def app(self, tmp_path, builder, cache=None, authors=None):
+        config = lambda: {"repos": {}, "claude": "claude", "terminal": "t", "me": None, "git_authors": authors or []}
+        app = dashboard.create_app(user_id=135, base_dir=str(tmp_path), work_config=config, coverage_builder=builder,
+                                   coverage_cache=cache, repo_dir="/admin", pos_dir="/pos")
+        return TestClient(app, base_url="http://127.0.0.1:8765")
+
+    def test_get_is_empty_until_built_and_never_runs_the_builder(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("PANTEON_BEARER_TOKEN", "tok")
+        calls = []
+        client = self.app(tmp_path, lambda **kw: calls.append(kw))
+        assert client.get("/api/coverage").json() == {"report": None, "step": None}
+        assert calls == []
+
+    def test_post_needs_the_header(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("PANTEON_BEARER_TOKEN", "tok")
+        calls = []
+        client = self.app(tmp_path, lambda **kw: calls.append(kw))
+        assert client.post("/api/coverage").status_code == 403
+        assert calls == []
+
+    def test_post_builds_caches_and_passes_the_settings(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("PANTEON_BEARER_TOKEN", "tok")
+        seen = {}
+
+        def builder(**kw):
+            seen.update(kw)
+            kw["progress"]("Fetching duell-admin")
+            return {"tickets": [{"issue": "4542", "state": "not_on_prod", "repos": {}, "unread": []}], "errors": {}}
+
+        client = self.app(tmp_path, builder, authors=["a@example.com"])
+        response = client.post("/api/coverage", headers={"X-Timeline-Desk": "1"})
+        assert response.status_code == 200 and response.json()["report"]["tickets"][0]["issue"] == "4542"
+        assert seen["dirs"] == {"duell-admin": "/admin", "duell-pos": "/pos"}
+        assert seen["authors"] == ["a@example.com"] and seen["base_dir"] == str(tmp_path)
+        assert callable(seen["status_lookup"])  # Timeline titles and flags
+        assert callable(seen["subscribed"])  # only the tickets you are subscribed to
+        assert client.get("/api/coverage").json() == {"report": response.json()["report"], "step": None}
+
+    def test_each_ticket_gets_its_timeline_link_from_its_project(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("PANTEON_BEARER_TOKEN", "tok")
+
+        def builder(**kw):
+            return {"tickets": [
+                {"issue": "4542", "state": "x", "repos": {}, "timeline": {"project_id": 16}},
+                {"issue": "1", "state": "x", "repos": {}, "timeline": {"project_id": 99}},  # a project not set up
+                {"issue": "2", "state": "x", "repos": {}, "timeline": None},  # Timeline was not read
+            ], "errors": {}}
+
+        config = lambda: {"repos": {"15033": {"id": 16, "name": "duell-admin"}, "9": {"name": "no id"}}, "git_authors": []}
+        app = dashboard.create_app(user_id=135, base_dir=str(tmp_path), work_config=config, coverage_builder=builder)
+        client = TestClient(app, base_url="http://127.0.0.1:8765")
+        tickets = client.post("/api/coverage", headers={"X-Timeline-Desk": "1"}).json()["report"]["tickets"]
+        assert tickets[0]["url"] == f"{pc.BASE_URL}/tasks#/list/15033/edit/4542"
+        assert "url" not in tickets[1] and "url" not in tickets[2]
+
+    def test_git_failure_is_a_502_and_keeps_the_old_report(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("PANTEON_BEARER_TOKEN", "tok")
+        import release_check
+
+        cache = dashboard.CoverageCache()
+        cache.report = {"tickets": [], "errors": {}}
+
+        def builder(**kw):
+            raise release_check.ReleaseCheckError("git is not installed")
+
+        client = self.app(tmp_path, builder, cache)
+        response = client.post("/api/coverage", headers={"X-Timeline-Desk": "1"})
+        assert response.status_code == 502 and "git is not installed" in response.json()["error"]
+        assert client.get("/api/coverage").json()["report"] == {"tickets": [], "errors": {}}
+        assert cache.step is None
+
+    def test_scheduler_rebuilds_then_waits_and_survives_failure(self):
+        import threading
+
+        stop = threading.Event()
+        calls = []
+
+        def rebuild():
+            calls.append(1)
+            if len(calls) == 1:
+                raise RuntimeError("offline")
+            stop.set()
+
+        dashboard.run_coverage_scheduler(rebuild, stop, active_hours=None, minutes=0, off_hours_minutes=0)
+        assert len(calls) == 2
+
+
+def test_config_reads_git_authors(tmp_path):
+    import work_session
+
+    path = tmp_path / "desk.json"
+    path.write_text(json.dumps({"git_authors": [" a@example.com ", "", "b@example.com"]}))
+    assert work_session.load_config(str(path))["git_authors"] == ["a@example.com", "b@example.com"]
+    assert work_session.load_config(str(tmp_path / "none.json"))["git_authors"] == []

@@ -19,7 +19,7 @@ import re
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from typing import Any, Dict, Iterable, Iterator, List, Optional
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Set
 
 import requests
 
@@ -169,6 +169,22 @@ def unwatch_task(issue: Any, base_dir: Optional[str] = None) -> bool:
     return bool(changed)
 
 
+def _purge_paused(base_dir: Optional[str]) -> List[str]:
+    """Removes watchlist rows an older version paused for being closed, with their events."""
+    conn = pc._open_planner_db(base_dir, create=False)
+    if conn is None:
+        return []
+    try:
+        with conn:
+            issues = [r[0] for r in conn.execute("SELECT issue_number FROM watchlist WHERE active = 0")]
+            for issue in issues:
+                conn.execute("DELETE FROM watchlist WHERE issue_number = ?", (issue,))
+                conn.execute("DELETE FROM task_events WHERE issue_number = ?", (issue,))
+    finally:
+        conn.close()
+    return issues
+
+
 def iter_my_open_tasks(headers: Dict[str, str], projects: Iterable[Dict[str, Any]],
                        user_id: Optional[Any] = None) -> Iterator[Dict[str, Any]]:
     """The user's own open tasks (every tab of every configured project), one at
@@ -181,6 +197,24 @@ def iter_my_open_tasks(headers: Dict[str, str], projects: Iterable[Dict[str, Any
             for group in page["groups"]:
                 for task in group["tasks"]:
                     yield {"issue_number": str(task["issue_number"]), "title": task["title"], "code": project.get("code")}
+
+
+def my_subscribed_issues(headers: Dict[str, str], projects: Iterable[Dict[str, Any]],
+                         user_id: Optional[Any] = None) -> Set[str]:
+    """
+    Issue numbers of the open tasks you are subscribed to: every tab and the Support tab of every configured project
+    (Timeline's `subscribed_by` filter, the same lists as the Task page). A few requests per project, nothing written.
+    Raises ValueError when no project is configured, because an empty answer would then be taken for "subscribed to
+    nothing".
+    """
+    projects = list(projects)
+    if not projects:
+        raise ValueError('No Timeline project is set up. Add an "id" (the API project id) to a repo in timeline-desk.json.')
+    issues = {t["issue_number"] for t in iter_my_open_tasks(headers, projects, user_id)}
+    for project in projects:
+        data = pc.fetch_project_tasks(project["id"], headers, user_id, code=project.get("code"), support=True)
+        issues.update(str(t["issue_number"]) for g in data["groups"] for t in g["tasks"])
+    return issues
 
 
 # --------------------------------------------------------------------------- #
@@ -211,13 +245,15 @@ def sync_watchlist(headers: Dict[str, str], base_dir: Optional[str] = None, issu
                    now: Optional[datetime] = None, refresh_meta: bool = True) -> Dict[str, Any]:
     """
     Fetches the timeline of every active watched task (or just `issues`) and
-    stores the events not seen before. A task that is closed is synced
-    one last time and then paused. With `refresh_meta` false a task whose id is
+    stores the events not seen before. A task that is closed is removed from
+    the watchlist together with its stored events (as are tasks paused by an older
+    version). With `refresh_meta` false a task whose id is
     already known skips the taskbyissue call, so it is not re-checked for being
     closed or retitled until the next sync that refreshes. One task failing is recorded on its row and
     doesn't stop the others; an authentication error does.
-    Returns {"tasks", "new_events", "errors": {issue: message}, "paused": [issue]}.
+    Returns {"tasks", "new_events", "errors": {issue: message}, "removed": [issue]}.
     """
+    removed = _purge_paused(base_dir)
     wanted = {_issue(i) for i in issues} if issues is not None else None
     rows = [r for r in list_watchlist(base_dir, active_only=True) if wanted is None or r["issue_number"] in wanted]
     if rows:  # a task without its creation row is fetched in full once (it also fixes tasks watched earlier)
@@ -229,7 +265,7 @@ def sync_watchlist(headers: Dict[str, str], base_dir: Optional[str] = None, issu
                 conn.close()
             for r in rows:
                 r["has_created"] = r["issue_number"] in have
-    result: Dict[str, Any] = {"tasks": len(rows), "new_events": 0, "errors": {}, "paused": []}
+    result: Dict[str, Any] = {"tasks": len(rows), "new_events": 0, "errors": {}, "removed": removed}
     if not rows:
         return result
     with ThreadPoolExecutor(max_workers=SYNC_WORKERS) as pool:
@@ -243,6 +279,11 @@ def sync_watchlist(headers: Dict[str, str], base_dir: Optional[str] = None, issu
                 result["errors"][issue] = got["error"]
                 conn.execute("UPDATE watchlist SET last_error = ? WHERE issue_number = ?", (got["error"], issue))
                 continue
+            if got["meta"].get("status") == "closed":
+                conn.execute("DELETE FROM watchlist WHERE issue_number = ?", (issue,))
+                conn.execute("DELETE FROM task_events WHERE issue_number = ?", (issue,))
+                result["removed"].append(issue)
+                continue
             before = conn.total_changes
             created = created_event(got["meta"], got["task_id"], issue) if got["meta"] else None
             for event in [created] + [parse_event(item, issue) for item in got["items"]]:
@@ -252,14 +293,10 @@ def sync_watchlist(headers: Dict[str, str], base_dir: Optional[str] = None, issu
                         "new_value, employee, photo, body, url, raw) VALUES (:id, :issue_number, :occurred_at, :kind, "
                         ":field_name, :old_value, :new_value, :employee, :photo, :body, :url, :raw)", event)
             result["new_events"] += conn.total_changes - before
-            still_open = got["meta"].get("status") != "closed"
-            if not still_open:
-                result["paused"].append(issue)
             conn.execute(
-                "UPDATE watchlist SET task_id = ?, title = COALESCE(NULLIF(?, ''), title), active = ?, "
-                "last_synced_at = ?, last_error = ? WHERE issue_number = ?",
-                (got["task_id"], got["meta"].get("title") or "", int(still_open), stamp,
-                 None if still_open else "Task is closed", issue))
+                "UPDATE watchlist SET task_id = ?, title = COALESCE(NULLIF(?, ''), title), "
+                "last_synced_at = ?, last_error = NULL WHERE issue_number = ?",
+                (got["task_id"], got["meta"].get("title") or "", stamp, issue))
         conn.commit()
     finally:
         conn.close()

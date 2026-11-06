@@ -36,6 +36,7 @@ from starlette.staticfiles import StaticFiles
 import jira_board
 import panteon_client
 import release_check
+import release_coverage
 import task_events
 import timeline_socket
 import work_session
@@ -60,6 +61,8 @@ DEFAULT_SNAPSHOT_MINUTES = 15
 STAGE_REFRESH_MINUTES = 60
 OFF_HOURS_MINUTES = 60
 DEFAULT_ACTIVE_HOURS = "7-19"
+COVERAGE_MINUTES = 60  # release coverage is rebuilt this often in the active hours (it must be seen to notice a drop)
+COVERAGE_OFF_HOURS_MINUTES = 180
 JITTER = 0.1
 WAKE_GAP_SECONDS = 15.0  # least time between two checks started by socket events
 WAKE_DEBOUNCE_SECONDS = 2.0  # a burst of events becomes one check
@@ -67,7 +70,8 @@ WAKE_DEBOUNCE_SECONDS = 2.0  # a burst of events becomes one check
 # the Help page shows it so the numbers can be checked.
 SCHEDULE = {"heartbeat_minutes": DEFAULT_HEARTBEAT_MINUTES, "full_minutes": DEFAULT_SNAPSHOT_MINUTES,
             "stage_minutes": STAGE_REFRESH_MINUTES, "off_hours_minutes": OFF_HOURS_MINUTES,
-            "active_hours": DEFAULT_ACTIVE_HOURS, "jitter_percent": int(JITTER * 100)}
+            "active_hours": DEFAULT_ACTIVE_HOURS, "jitter_percent": int(JITTER * 100),
+            "coverage_minutes": COVERAGE_MINUTES, "coverage_off_hours_minutes": COVERAGE_OFF_HOURS_MINUTES}
 
 
 PLANNER_CACHE_SECONDS = 300
@@ -117,6 +121,16 @@ IMAGE_TYPES = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "g
 IMMUTABLE = {"Cache-Control": "private, max-age=31536000, immutable"}
 
 
+class CoverageCache:
+    """The latest release coverage report, kept in memory. The scheduler and the Check again button rebuild it;
+    reading it never touches git. `step` says what a running rebuild is doing."""
+
+    def __init__(self):
+        self.report: Optional[Dict[str, Any]] = None
+        self.step: Optional[str] = None
+        self.lock = threading.Lock()
+
+
 def _respond(call: Callable[[], Any]) -> JSONResponse:
     """Runs a blocking client call and maps its failures to JSON errors."""
     try:
@@ -150,6 +164,8 @@ def create_app(
     claude_home: Optional[str] = None,
     pr_runner: Any = None,
     pos_dir: Optional[str] = None,
+    coverage_builder: Callable[..., Any] = release_coverage.build_coverage,
+    coverage_cache: Optional[CoverageCache] = None,
 ) -> Starlette:
     """
     Builds the app. `user_id` and `base_dir` work as in fetch_my_day;
@@ -165,8 +181,9 @@ def create_app(
     git_kwargs = {"runner": work_runner} if work_runner else {}
     pr_kwargs = {"runner": pr_runner} if pr_runner else {}
     start_kwargs = {**git_kwargs, **({"launcher": work_launcher} if work_launcher else {})}
-    release = {"report": None, "lock": threading.Lock()}
+    release = {"report": None, "step": None, "lock": threading.Lock()}
     planners = planner_cache or PlannerCache()
+    coverage = coverage_cache or CoverageCache()
     image_dir = Path(panteon_client.planner_db_path(base_dir)).parent / "images"
 
     def headers():
@@ -266,6 +283,9 @@ def create_app(
     def api_release(request: Request):
         return JSONResponse({"report": release["report"]})
 
+    def api_release_progress(request: Request):
+        return JSONResponse({"step": release["step"]})
+
     def api_release_refresh(request: Request):
         # Runs git fetch, so it is a POST with the same header guard as snapshots.
         if request.headers.get("x-timeline-desk") != "1":
@@ -273,16 +293,34 @@ def create_app(
 
         def build():
             with release["lock"]:
+                release["step"] = "Collecting your tickets (planner, watchlist, workflows)"
+                extra_ids = guard_candidates()
                 release["report"] = release_builder(
                     repo_dir=repo_dir,
                     pos_dir=pos_dir,
                     status_lookup=lambda ids: panteon_client.get_task_statuses(ids, headers()),
-                    extra_ids=guard_candidates(),
+                    extra_ids=extra_ids,
                     project_ok=guard_project_ok(),
                     only_mine=True,
+                    progress=lambda text: release.update(step=text),
                 )
+                release["step"] = None
             return {"report": release["report"]}
         return _respond(build)
+
+    def api_coverage(request: Request):
+        return JSONResponse({"report": coverage.report, "step": coverage.step})
+
+    def api_coverage_refresh(request: Request):
+        # Runs git fetch in both checkouts, so it is a POST with the header guard.
+        if request.headers.get("x-timeline-desk") != "1":
+            return JSONResponse({"error": "Missing X-Timeline-Desk header."}, status_code=403)
+        return _respond(lambda: {"report": rebuild_coverage()})
+
+    def rebuild_coverage() -> Dict[str, Any]:
+        return run_coverage(coverage, coverage_builder, work_config(), base_dir, repo_dir, pos_dir,
+                            lambda ids: panteon_client.get_task_statuses(ids, headers()),
+                            lambda: task_events.my_subscribed_issues(headers(), jira_projects(), resolved_user()))
 
     def guard_candidates() -> List[str]:
         """The user's own tickets, whose stage should match their PRs: planner, watchlist (watched), active workflows."""
@@ -737,6 +775,9 @@ def create_app(
         Route("/api/attachment/{name}", storage_proxy("attachments")),
         Route("/api/release", api_release),
         Route("/api/release", api_release_refresh, methods=["POST"]),
+        Route("/api/release/progress", api_release_progress),
+        Route("/api/coverage", api_coverage),
+        Route("/api/coverage", api_coverage_refresh, methods=["POST"]),
         Route("/api/pr-guard", api_pr_guard),
         Route("/api/pr/draft", api_pr_draft),
         Route("/api/pr/describe", api_pr_describe, methods=["POST"]),
@@ -765,6 +806,48 @@ def create_app(
         Middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS),
     ]
     return Starlette(routes=routes, middleware=middleware)
+
+
+def run_coverage(cache: CoverageCache, builder: Callable[..., Any], config: Dict[str, Any], base_dir: Optional[str],
+                 repo_dir: Optional[str] = None, pos_dir: Optional[str] = None,
+                 status_lookup: Optional[Callable[[List[str]], List[Dict[str, Any]]]] = None,
+                 subscribed: Optional[Callable[[], Any]] = None) -> Dict[str, Any]:
+    """Rebuilds the coverage report into `cache`; one rebuild at a time (a second caller waits, then gets that result)."""
+    with cache.lock:
+        cache.step = "Starting"
+        try:
+            cache.report = builder(
+                dirs={release_check.ADMIN: repo_dir, release_check.POS: pos_dir},
+                authors=config.get("git_authors") or None,
+                base_dir=base_dir,
+                status_lookup=status_lookup,
+                subscribed=subscribed,
+                progress=lambda text: setattr(cache, "step", text),
+            )
+        finally:
+            cache.step = None
+        # Each ticket's Timeline page: its project's list code is in timeline-desk.json (repos keyed by that code).
+        codes = {str(repo["id"]): code for code, repo in (config.get("repos") or {}).items() if repo.get("id")}
+        for ticket in (cache.report or {}).get("tickets", []):
+            code = codes.get(str((ticket.get("timeline") or {}).get("project_id")))
+            if code:
+                ticket["url"] = panteon_client.task_url(ticket["issue"], code)
+        return cache.report
+
+
+def run_coverage_scheduler(rebuild: Callable[[], Any], stop: threading.Event, active_hours: Optional[tuple] = None,
+                           minutes: float = COVERAGE_MINUTES, off_hours_minutes: float = COVERAGE_OFF_HOURS_MINUTES,
+                           now: Callable[[], datetime] = datetime.now, jitter: float = JITTER) -> None:
+    """Rebuilds the coverage report at startup and then hourly (every few hours outside the active hours), because a
+    commit can only be seen dropping from qa-release if a check ran while it was still there. Failures are logged."""
+    while True:
+        try:
+            rebuild()
+        except Exception as exc:  # keep the loop alive whatever fails
+            print(f"Release coverage check failed: {exc}", flush=True)
+        wait = (minutes if is_active(now(), active_hours) else off_hours_minutes) * 60
+        if stop.wait(wait * (1 + random.uniform(-jitter, jitter))):
+            return
 
 
 def parse_active_hours(text: Optional[str]) -> Optional[tuple]:
@@ -910,8 +993,19 @@ def main(argv=None) -> int:
         "full_seconds": max(args.interval, args.heartbeat, 1) * 60,
         "active_hours": parse_active_hours(args.active_hours),
     }).start()
+    coverage_cache = CoverageCache()
+    threading.Thread(target=run_coverage_scheduler, daemon=True, args=(
+        lambda: run_coverage(coverage_cache, release_coverage.build_coverage, work_session.load_config(), args.base_dir,
+                             args.repo_dir, args.pos_dir,
+                             lambda ids: panteon_client.get_task_statuses(ids, panteon_client.build_api_headers()),
+                             lambda: task_events.my_subscribed_issues(
+                                 panteon_client.build_api_headers(),
+                                 work_session.public_config(work_session.load_config())["projects"],
+                                 panteon_client.resolve_user_id(args.user_id))),
+        stop, parse_active_hours(args.active_hours))).start()
     try:
-        uvicorn.run(create_app(args.user_id, args.base_dir, args.repo_dir, planner_cache=planner_cache, pos_dir=args.pos_dir), host="127.0.0.1", port=args.port, log_level="warning")
+        uvicorn.run(create_app(args.user_id, args.base_dir, args.repo_dir, planner_cache=planner_cache, pos_dir=args.pos_dir,
+                               coverage_cache=coverage_cache), host="127.0.0.1", port=args.port, log_level="warning")
     finally:
         stop.set()
         wake.set()

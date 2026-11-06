@@ -48,7 +48,7 @@ def config_path() -> str:
 
 def load_config(path: Optional[str] = None) -> Dict[str, Any]:
     """
-    {"repos": {code: {"id" (API project id), "name", "path", "base", "worktrees"}}, "claude", "terminal", "me"}
+    {"repos": {code: {"id" (API project id), "name", "path", "base", "worktrees"}}, "claude", "terminal", "me", "git_authors"}
     with paths made absolute (relative ones resolve against the config file).
     A missing file means no repos, so no Start buttons.
     """
@@ -81,6 +81,8 @@ def load_config(path: Optional[str] = None) -> Dict[str, Any]:
         "terminal": raw.get("terminal") or "gnome-terminal",
         # Your name as Timeline shows it, so your own comments aren't taken for QA findings.
         "me": (raw.get("me") or "").strip() or None,
+        # Git emails that count as you for release coverage; empty = each checkout's own `git config user.email`.
+        "git_authors": [str(a).strip() for a in (raw.get("git_authors") or []) if str(a).strip()],
     }
 
 

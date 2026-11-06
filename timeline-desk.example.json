@@ -10,5 +10,6 @@
   },
   "claude": "~/.local/bin/claude",
   "terminal": "gnome-terminal",
-  "me": "Your Name As Timeline Shows It"
+  "me": "Your Name As Timeline Shows It",
+  "git_authors": ["you@example.com"]
 }

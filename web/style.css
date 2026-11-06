@@ -632,7 +632,11 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 0.85; 
 .tl-chip-main b { font-family: var(--mono); }
 .tl-chip-main small { font: 600 11px var(--mono); color: var(--muted); padding: 0 6px; border-radius: 999px; background: var(--bg); }
 .tl-chip:hover { border-color: hsl(var(--hue) 60% 62%); }
-.tl-chip:has([aria-pressed="true"]) { border-color: hsl(var(--hue) 75% 68%); background: color-mix(in srgb, hsl(var(--hue) 75% 68%) 20%, var(--surface)); }
+.tl-chip:has([aria-pressed="true"]) { border-color: hsl(var(--hue) 80% 66%); background: color-mix(in srgb, hsl(var(--hue) 80% 66%) 42%, var(--surface)); box-shadow: 0 0 0 2px hsl(var(--hue) 80% 66%), 0 0 14px color-mix(in srgb, hsl(var(--hue) 80% 66%) 55%, transparent); border-radius: 6px; }
+.tl-chip:has([aria-pressed="true"]) .tl-chip-main b { color: var(--ink); }
+.tl-chip:has([aria-pressed="true"]) .tl-chip-main i { box-shadow: 0 0 0 3px color-mix(in srgb, hsl(var(--hue) 80% 66%) 45%, transparent); }
+.tl-chips:has([aria-pressed="true"]) .tl-chip:not(:has([aria-pressed="true"])) { opacity: 0.55; }
+.tl-chips:has([aria-pressed="true"]) .tl-chip:not(:has([aria-pressed="true"])):hover { opacity: 1; }
 .tl-dialog { width: min(520px, calc(100vw - 32px)); padding: 20px 22px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
 .tl-dialog::backdrop { background: rgb(0 0 0 / 0.55); }
 .tl-dialog header { display: flex; align-items: center; justify-content: space-between; }
@@ -1077,3 +1081,137 @@ a.trow:hover .jira-addchip, .jira-addchip:focus-visible { border: 1px dashed var
 .jira-layout .jira-card .head .badge.s-pill { font-size: 11px; font-weight: 700; padding: 0 6px; margin-left: auto; }
 .jira-layout .jira-card .head .badge.s-pill + a.ext { margin-left: 0; }
 .jira-task .badge.closed { color: var(--blocked); border-color: var(--blocked); }
+
+/* Release coverage: one card per ticket, a commit table per repository. */
+.cov-card { margin-bottom: 14px; border: 0; }
+.cov-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin-bottom: 6px; }
+.cov-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* One panel per repository: header with chips, a progress bar, and a table whose columns are the same everywhere. */
+.cov-repo { margin-top: 12px; padding: 10px 12px 8px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); }
+.cov-repo-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.cov-repo-head h4 { margin: 0; font-size: 15px; }
+.cov-branch { font-weight: 400; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.cov-chips { margin-left: auto; display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.cov-chip { display: inline-flex; gap: 6px; align-items: baseline; padding: 1px 9px; border-radius: 999px; border: 1px solid currentColor; font-size: 12px; background: var(--surface); }
+.cov-chip strong { font-family: var(--mono); }
+.cov-chip.ok { color: var(--done); }
+.cov-chip.warn { color: var(--progress); }
+.cov-chip.bad { color: var(--blocked); }
+.cov-meta { margin: 0 0 6px; font-size: 12px; }
+.cov-table-wrap { overflow-x: auto; }
+.cov-commits { width: 100%; min-width: 640px; table-layout: fixed; border-collapse: collapse; font-size: 13px; }
+.cov-commits .c-sha { width: 112px; }
+.cov-commits .c-date { width: 96px; }
+.cov-commits .c-author { width: 140px; }
+.cov-commits .c-pill { width: 86px; }
+.cov-commits td { padding: 5px 8px; vertical-align: top; border-top: 1px solid var(--line); overflow: hidden; text-overflow: ellipsis; }
+.cov-commits td.cov-subject { white-space: normal; overflow-wrap: anywhere; }
+.cov-commits td.note { white-space: nowrap; }
+.cov-commits tbody tr:first-child td { border-top: 0; }
+.cov-commits tr.missing td:first-child { box-shadow: inset 3px 0 0 var(--blocked); }
+.cov-commits tr.dropped td { background: rgba(240, 103, 90, 0.14); }
+.cov-commits tr.cov-released td { color: var(--muted); }
+.cov-sha { font-family: var(--mono); font-weight: 600; color: #d9dee7; text-decoration: none; border-bottom: 1px dotted currentColor; }  /* white-grey: the git link */
+.cov-sha::after { content: " \2197"; font-size: 10px; opacity: 0.7; }
+.cov-sha:hover { color: var(--ink); }
+.cov-pill { display: inline-block; min-width: 62px; padding: 0 8px; text-align: center; border-radius: 999px; border: 1px solid currentColor; font: 600 12px var(--mono); white-space: nowrap; }
+.cov-pill.yes { color: var(--done); }
+.cov-pill.no { color: var(--blocked); }
+.cov-pill.dropped { color: var(--blocked); background: rgba(240, 103, 90, 0.2); }
+.cov-released .cov-pill { opacity: 0.75; }
+
+.cov-flags { margin: 4px 0 6px; padding: 0; list-style: none; }
+.cov-flags li { margin: 3px 0; }
+.cov-jira { display: inline-flex; align-items: center; gap: 6px; }
+/* The two statuses of the task, Timeline and Jira, side by side at the right edge; the state badge sits by the title. */
+.cov-statuses { margin-left: auto; display: inline-flex; align-items: center; gap: 8px 22px; flex-wrap: wrap; }
+.cov-status { display: inline-flex; align-items: center; gap: 6px; }
+.cov-stage { padding: 1px 12px; font: 600 13px var(--font); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; white-space: nowrap; }
+/* The pencil and the add chip normally wait for a row hover; a card has no row, so they are always shown. */
+.cov-card .jira-edit { opacity: 1; }
+.cov-card .jira-edit.jira-addchip { width: auto; border: 1px dashed var(--line); color: var(--muted); }
+.cov-card .jira-addchip .dash { display: none; }
+.cov-card .jira-addchip .add { display: inline; }
+.cov-card .jira-edit.jira-addchip:hover { border-color: var(--accent); color: var(--accent-ink); }
+
+/* ---- Coverage: larger type, section headings, highlighted table header and toggle ---- */
+
+.cov-card { font-size: 16px; }
+.cov-card .issue { font-size: 21px; }
+.cov-card .cov-head .cov-title { font-size: 20px; font-weight: 500; color: var(--ink); }
+.cov-card .badge { font-size: 14px; padding: 2px 10px; }
+.cov-card .note { font-size: 15px; }
+.cov-flags li { font-size: 16px; }
+.cov-jira .note { font-size: 15px; }
+.cov-repo-head h4 { font-size: 20px; color: hsl(50 95% 72%); }  /* yellow: the repository name, the same for both repositories */
+.cov-branch { font-size: 14px; }
+.cov-chip { font-size: 14px; padding: 2px 11px; }
+.cov-meta { font-size: 14px; }
+.cov-commits { font-size: 15px; min-width: 720px; }
+.cov-commits .c-sha { width: 128px; }
+.cov-commits .c-date { width: 108px; }
+.cov-commits .c-author { width: 130px; }
+.cov-commits .c-pill { width: 108px; }
+.cov-commits td { padding: 7px 10px; }
+.cov-pill { font-size: 14px; min-width: 76px; padding: 1px 10px; }
+.cov-sha::after { font-size: 12px; }
+
+
+/* ---- Coverage page layout (everything outside the ticket cards) ---- */
+.cov-page { width: 100%; }
+
+.cov-page-head { display: flex; align-items: center; justify-content: flex-start; gap: 14px; margin-bottom: 20px; }
+.cov-page-head .btn { padding: 9px 18px; font-size: 15px; }
+.cov-stamp { font-size: 14px; color: var(--muted); }
+.cov-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 22px; }
+.cov-tile { padding: 14px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+.cov-tile-value { font: 700 36px/1.1 var(--mono); }
+.cov-tile-label { margin-top: 4px; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.cov-tile.bad .cov-tile-value { color: var(--blocked); }
+.cov-tile.good .cov-tile-value { color: var(--done); }
+.cov-tile.muted .cov-tile-value { color: var(--muted); }
+
+.cov-controls { display: flex; justify-content: space-between; align-items: center; gap: 12px 20px; flex-wrap: wrap; margin-bottom: 34px; }
+.cov-segmented { display: inline-flex; padding: 3px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; }
+.cov-seg { display: inline-flex; align-items: center; gap: 8px; padding: 7px 16px; font: 600 15px var(--font); color: var(--muted); background: transparent; border: 0; border-radius: 999px; cursor: pointer; }
+.cov-seg:hover { color: var(--ink); }
+.cov-seg.on { color: var(--on-accent); background: var(--accent); }
+.cov-seg .n { font-family: var(--mono); font-size: 13px; padding: 0 7px; border-radius: 999px; background: rgba(0, 0, 0, 0.18); }
+.cov-seg.on .n { background: rgba(10, 26, 51, 0.2); }
+.cov-info { display: flex; gap: 8px; flex-wrap: wrap; }
+.cov-info-chip { padding: 4px 12px; font-size: 14px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; }
+.cov-info-chip strong { font-weight: 600; color: var(--ink); }
+.cov-empty { padding: 40px 0; text-align: center; font-size: 17px; color: var(--muted); }
+
+/* A section: a heading with a short rule, then its tickets. Not a card, so it never looks like one. */
+.cov-section { margin-bottom: 44px; }
+.cov-section > summary.cov-section-head { display: block; list-style: none; cursor: pointer; margin-bottom: 18px; }
+.cov-section > summary.cov-section-head::-webkit-details-marker { display: none; }
+.cov-section-top { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.cov-section-top::before { content: "\25B8"; width: 18px; color: var(--muted); font-size: 18px; }
+.cov-section[open] .cov-section-top::before { content: "\25BE"; }
+.cov-section-title { font-size: 26px; font-weight: 700; letter-spacing: -0.015em; }
+.cov-section-top .count { padding: 1px 12px; font: 600 16px var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 999px; }
+.cov-section-top .badge { padding: 2px 12px; font-size: 14px; }
+.cov-section-top .note { font-size: 15px; color: var(--done); }
+.cov-hint { margin: 6px 0 0 30px; max-width: 90ch; font-size: 15px; line-height: 1.5; color: var(--muted); }
+.cov-section.needs .cov-section-title { color: var(--ink); }
+@media (max-width: 720px) {
+  .cov-summary { grid-template-columns: 1fr; }
+  .cov-hint { margin-left: 0; }
+}
+.cov-head .open-tl { margin-left: 0; padding: 1px 8px; font-size: 14px; line-height: 20px; align-self: center; }
+
+/* On a wide enough screen the title row never wraps: a long title is cut with an ellipsis, so the Timeline and Jira
+   chips stay on the first row and the flag message is always the second row. */
+@media (min-width: 900px) {
+  .cov-head { flex-wrap: nowrap; align-items: center; }
+  .cov-head > * { flex: none; }
+  .cov-head > .cov-title { flex: 0 1 auto; min-width: 80px; }
+  .cov-statuses { flex-wrap: nowrap; }
+}
+.cov-commits td:nth-last-child(-n+2) { overflow: visible; text-overflow: clip; }  /* the pills never get an ellipsis */
+/* The Show/Hide row folds the commits that are on QA and production: just a link-coloured label, no lines or fill. */
+.cov-commits tr.cov-toggle td { padding: 0; background: none; border: 0; }
+.cov-toggle-btn { display: block; width: 100%; padding: 9px 10px; text-align: left; font: inherit; font-size: 15px; font-weight: 700; color: var(--ink); background: none; border: 0; cursor: pointer; }
+.cov-toggle-btn:hover { color: var(--accent-ink); text-decoration: underline; }

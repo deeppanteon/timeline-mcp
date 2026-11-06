@@ -115,14 +115,23 @@ class TestSync:
         te.sync_watchlist({}, str(tmp_path), now=NOW)
         assert {c[1] for c in fake_api["calls"] if c[0] == "task"} == {"5"}
 
-    def test_closed_task_is_synced_once_then_paused(self, fake_api, tmp_path):
+    def test_closed_task_is_removed_with_its_events(self, fake_api, tmp_path):
         fake_api["status"] = "closed"
         te.watch_task(5, None, "", str(tmp_path), now=NOW)
         result = te.sync_watchlist({}, str(tmp_path), now=NOW)
-        assert result["paused"] == ["5"] and result["new_events"] == 5
-        row = te.list_watchlist(str(tmp_path))[0]
-        assert row["active"] is False and row["last_error"] == "Task is closed"
-        assert te.sync_watchlist({}, str(tmp_path), now=NOW)["tasks"] == 0
+        assert result["removed"] == ["5"] and result["new_events"] == 0
+        assert te.list_watchlist(str(tmp_path)) == []
+        assert te.list_events(str(tmp_path))["events"] == []
+
+    def test_a_task_paused_by_an_older_version_is_purged(self, fake_api, tmp_path):
+        te.watch_task(5, None, "", str(tmp_path), now=NOW)
+        te.sync_watchlist({}, str(tmp_path), now=NOW)
+        conn = te.pc._open_planner_db(str(tmp_path), create=False)
+        conn.execute("UPDATE watchlist SET active = 0")
+        conn.commit()
+        conn.close()
+        assert te.sync_watchlist({}, str(tmp_path), now=NOW)["removed"] == ["5"]
+        assert te.list_watchlist(str(tmp_path)) == [] and te.list_events(str(tmp_path))["events"] == []
 
     def test_one_failure_does_not_stop_the_others(self, fake_api, tmp_path):
         for i in (404, 5):
@@ -236,3 +245,27 @@ def test_events_marker_changes_when_events_are_stored(fake_api, tmp_path):
     te.sync_watchlist({}, base, now=NOW)
     after = te.events_marker(base)
     assert after["count"] == 6 and after["max_id"] > before["max_id"]
+
+
+class TestMySubscribedIssues:
+    """The open tasks you are subscribed to: every tab and the Support tab of every configured project."""
+
+    def test_union_of_tabs_and_support_over_projects(self, monkeypatch):
+        calls = []
+
+        def fake(pid, headers, user_id=None, code=None, tab=None, today=None, support=False):
+            calls.append((pid, tab, support))
+            if support:
+                return {"tabs": [], "tab": None, "groups": [{"name": "s", "tasks": [{"issue_number": 900 + pid}]}]}
+            tabs = [{"name": "Dev"}, {"name": "QA"}]
+            tasks = {None: [1, 2], "Dev": [1, 2], "QA": [3]}[tab]
+            return {"tabs": tabs, "tab": "Dev", "groups": [{"name": "g", "tasks": [{"issue_number": n, "title": ""} for n in tasks]}]}
+
+        monkeypatch.setattr(pc, "fetch_project_tasks", fake)
+        got = te.my_subscribed_issues({}, [{"id": 16, "code": "1"}, {"id": 17, "code": "2"}], 111)
+        assert got == {"1", "2", "3", "916", "917"}  # numbers as strings, support included
+        assert (16, None, True) in calls and (17, None, True) in calls
+
+    def test_no_project_is_an_error_not_an_empty_set(self):
+        with pytest.raises(ValueError, match="No Timeline project"):
+            te.my_subscribed_issues({}, [], 111)

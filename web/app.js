@@ -748,7 +748,7 @@ async function showTimeline(force) {
   if (active.length) {
     watchedTile.classList.add("has-hover");
     watchedTile.tabIndex = 0;
-    watchedTile.append(h("ul", { class: "tl-hover-list", "aria-label": "Watched tasks" }, active.map((w) => h("li", {},
+    watchedTile.append(h("ul", { class: "tl-hover-list", "aria-label": "Watched tasks" }, [...active].sort((a, b) => Number(a.issue_number) - Number(b.issue_number)).map((w) => h("li", {},
       h("strong", {}, `#${w.issue_number}`), " ", w.title || "", " ", openInTimeline(w.issue_number, w.url), supportTag(w.issue_number)))));
   }
   put(summary,
@@ -768,14 +768,14 @@ async function showTimeline(force) {
       svgIcon(k.icon, 14), k.label)));
   const search = h("input", { type: "search", class: "tl-search", placeholder: "Search the loaded events…", "aria-label": "Search events", value: eventsState.q });
   const chips = h("div", { class: "tl-chips", role: "group", "aria-label": "Filter by task" });
+  const byIssue = (list) => [...list].sort((a, b) => Number(a.issue_number) - Number(b.issue_number));
   const fillChips = (active) => put(chips,
-    active.map((w) => h("span", { class: "tl-chip", style: taskStyle(w.issue_number) },
+    byIssue(active).map((w) => h("span", { class: "tl-chip", style: taskStyle(w.issue_number) },
       h("button", { type: "button", class: "tl-chip-main", "aria-pressed": String(eventsState.issues.has(w.issue_number)),
-        title: `Show only #${w.issue_number}${w.title ? ` · ${w.title}` : ""}${w.last_synced_at ? ` (synced ${niceTime(w.last_synced_at)})` : ""}`,
+        title: `Add or remove #${w.issue_number} in the filter${w.title ? ` · ${w.title}` : ""}${w.last_synced_at ? ` (synced ${niceTime(w.last_synced_at)})` : ""}`,
         onclick: () => {
-          const wasOn = eventsState.issues.has(w.issue_number);
-          eventsState.issues.clear();
-          if (!wasOn) eventsState.issues.add(w.issue_number);
+          if (eventsState.issues.has(w.issue_number)) eventsState.issues.delete(w.issue_number);
+          else eventsState.issues.add(w.issue_number);
           redraw();
         } },
         h("i", { "aria-hidden": "true" }), h("b", {}, `#${w.issue_number}`), supportTag(w.issue_number), h("small", {}, w.events)))));
@@ -810,7 +810,16 @@ async function showTimeline(force) {
       rows.push(card);
     }
     put(feed, rows);
-    put(empty, rows.length ? null : h("p", { class: "note" }, q ? "No loaded event matches your search." : "No events match these filters."));
+    const narrowed = [eventsState.issues.size ? `task ${[...eventsState.issues].map((i) => `#${i}`).join(", ")}` : null,
+      q ? `search “${eventsState.q.trim()}”` : null].filter(Boolean);
+    put(empty, rows.length ? null : h("p", { class: "note" },
+      narrowed.length ? `No events match your filters (${narrowed.join(" + ")}). ` : "No events match these filters. ",
+      narrowed.length ? h("button", { type: "button", class: "btn ghost small", onclick: () => {
+        eventsState.issues.clear();
+        eventsState.q = "";
+        search.value = "";
+        redraw();
+      } }, "Clear filters") : null));
     put(more, cursor ? h("button", { type: "button", class: "btn ghost", onclick: async (ev) => {
       ev.currentTarget.disabled = true;
       try { add(await query(cursor)); } catch (error) { toast(error.message, true); }
@@ -923,8 +932,19 @@ async function checkRelease(results, stamp, button, fetchFresh) {
     // An old report would say "all PRs in place" about yesterday, so a stale one is rebuilt.
     const stale = report && Date.now() - new Date(report.generated_at) > RELEASE_STALE_MS;
     if (!report || fetchFresh || stale) {
-      stamp.textContent = "Fetching from GitHub… (about 10 s)";
-      ({ report } = await api("/api/release", { method: "POST", headers: { "X-Timeline-Desk": "1" } }));
+      stamp.textContent = "Starting…";
+      const started = Date.now();
+      const poll = setInterval(async () => {  // shows which step the build is on
+        try {
+          const { step } = await api("/api/release/progress");
+          if (step) stamp.textContent = `${step}… (${Math.round((Date.now() - started) / 1000)} s)`;
+        } catch { /* the build request reports real errors */ }
+      }, 700);
+      try {
+        ({ report } = await api("/api/release", { method: "POST", headers: { "X-Timeline-Desk": "1" } }));
+      } finally {
+        clearInterval(poll);
+      }
     }
     await getWorkflows(true);
     renderPrs(report, results, () => checkRelease(results, stamp, button, true));
@@ -1575,7 +1595,7 @@ async function showTaskList(refresh) {
             .then(() => { if (token === listToken && parseIds(listState.q)[0] === lookupId) renderList(); });
         } else if (got) {
           outsideRow = got.task
-            ? h("a", { class: "trow", href: `#/task/${got.task.issue_id}` }, watchButton(got.task.issue_id),
+            ? h("a", { class: "trow", href: `#/task/${got.task.issue_id}` }, got.task.status === "closed" ? h("span") : watchButton(got.task.issue_id),
               h("span", { class: "issue" }, `#${got.task.issue_id}`),
               h("div", { class: "ttitle" }, h("span", { class: "tname" }, got.task.title, openInTimeline(got.task.issue_id, got.task.url))),
               h("span"), h("span", {}, got.task.status || ""), h("span"), h("span"), h("span"), h("span"))
@@ -2550,6 +2570,228 @@ async function showJira() {
   window.addEventListener("resize", fit);
 }
 
+// ---- release coverage: which of my commits are on QA and production? ---------------
+// Built by release_coverage.py from git (both repos), with its history in our database. Read only: it only shows.
+const COVERAGE_STALE_MS = 60 * 60 * 1000;
+const COVERAGE_STATE = {
+  dropped: ["Dropped", "overdue", "Commits that were on QA or production are gone from it (the branch was reset or rebuilt)."],
+  not_released: ["Not released", "overdue", "None of the commits is on QA or production."],
+  not_on_prod: ["Not on production", "overdue", "Some commits reached QA, some did not, and none is on production."],
+  partial: ["Partly on production", "soon", "Some commits are on production, some are not."],
+  on_qa: ["On QA", "", "Every commit is on QA, waiting for production."],
+  shipped: ["Shipped", "ok", "Every commit is on production."],
+};
+// Tickets are grouped by Timeline's stage, which says what to expect of the code (the server sets `section` and `attention`).
+const COVERAGE_SECTIONS = {
+  dev: ["In development", "Nothing is expected on QA or production yet, so a ticket here is not judged by missing commits. One is listed only when its code is already ahead of Timeline: on QA or production while Timeline still says before QA.", "ahead of Timeline"],
+  qa: ["In QA", "Every commit should be on QA.", "need attention"],
+  qa_blocked: ["QA blocked", "QA found a problem. Every commit should still be on QA.", "need attention"],
+  approved: ["QA approved", "Every commit should reach production.", "need attention"],
+  live: ["Live", "Timeline says Live: every commit should be on production. Closed tickets are left out completely.", "need attention"],
+  unknown: ["Timeline status not read", "Nothing could be read from Timeline for these (it was unreachable, or it does not know the ticket). Only the code state is judged.", "need attention"],
+};
+const COVERAGE_SECTION_ORDER = ["dev", "qa", "qa_blocked", "approved", "live", "unknown"];
+const coverageView = { filter: "attention", open: {} };
+const utc = (iso) => (iso ? `${iso}Z` : iso);
+const shortDate = (iso) => (iso ? String(iso).slice(0, 10) : "never");
+
+const COVERAGE_SHA = /^[0-9a-f]{7,40}$/;
+const COVERAGE_OPEN_LIMIT = 40;  // commits not on production listed per repository before "and N more"
+
+// One column set for every table (see .cov-commits), so the repositories and tickets line up.
+function coverageColumns() {
+  return h("colgroup", {}, ["sha", "date", "author", "msg", "pill", "pill"].map((c) => h("col", { class: `c-${c}` })));
+}
+
+function coverageSha(c, url) {
+  if (!url || !COVERAGE_SHA.test(c.sha)) return h("code", {}, c.short);
+  return h("a", { class: "cov-sha", href: `${url}/commit/${c.sha}`, target: "_blank", rel: "noopener noreferrer",
+    title: `Open ${c.sha} on GitHub` }, c.short);
+}
+
+function coveragePill(label, on, dropped) {
+  const [cls, text] = dropped ? ["dropped", `${label} dropped`] : on ? ["yes", `✓ ${label}`] : ["no", `✗ ${label}`];
+  return h("span", { class: `cov-pill ${cls}` }, text);
+}
+
+function coverageCommit(c, url, released) {
+  const dropped = c.dropped_qa || c.dropped_prod;
+  return h("tr", { class: `cov-row${dropped ? " dropped" : ""}${!c.prod && !released ? " missing" : ""}${released ? " cov-released" : ""}`, hidden: released },
+    h("td", {}, coverageSha(c, url)),
+    h("td", { class: "note" }, shortDate(c.date)),
+    h("td", { class: "note", title: c.email || "" }, String(c.email || c.author || "").split("@")[0]),
+    h("td", { class: "cov-subject" }, c.subject),
+    h("td", {}, coveragePill("QA", c.qa, c.dropped_qa)),
+    h("td", {}, coveragePill("Prod", c.prod, c.dropped_prod)));
+}
+
+function coverageChip(label, n, total) {
+  const tone = n === total ? "ok" : n === 0 ? "bad" : "warn";
+  return h("span", { class: `cov-chip ${tone}` }, h("span", {}, label), h("strong", {}, `${n}/${total}`));
+}
+
+function coverageRepo(row, checks) {
+  // Commits not on production (or dropped) are listed; the ones on both sit behind a Show/Hide row in the same table.
+  const open = row.commits.filter((c) => !c.prod || c.dropped_qa || c.dropped_prod);
+  const done = row.commits.filter((c) => !open.includes(c));
+  const shown = open.slice(0, COVERAGE_OPEN_LIMIT);
+  const checked = checks && checks[row.repo] && checks[row.repo].checked_at;
+  const doneRows = done.map((c) => coverageCommit(c, row.url, true));
+  const toggle = h("button", { type: "button", class: "cov-toggle-btn", "aria-expanded": "false" });
+  const label = (expanded) => `${expanded ? "▾ Hide" : "▸ Show"} ${done.length} commit${done.length === 1 ? "" : "s"} on QA and production`;
+  toggle.textContent = label(false);
+  toggle.addEventListener("click", () => {
+    const expanded = toggle.getAttribute("aria-expanded") !== "true";
+    toggle.setAttribute("aria-expanded", String(expanded));
+    toggle.textContent = label(expanded);
+    for (const r of doneRows) r.hidden = !expanded;
+  });
+  return h("section", { class: "cov-repo", "data-repo": row.repo },
+    h("div", { class: "cov-repo-head" },
+      h("h4", {}, row.repo),
+      row.branches.map((b) => h("code", { class: "cov-branch" }, b)),
+      h("span", { class: "cov-chips" }, coverageChip("On QA", row.on_qa, row.total), coverageChip("On production", row.on_prod, row.total))),
+    h("p", { class: "note cov-meta" },
+      `Newest commit on QA ${shortDate(row.last_qa_commit_at)} · on production ${shortDate(row.last_prod_commit_at)}`,
+      checked ? ` · checked ${ago(utc(checked))}` : ""),
+    h("div", { class: "cov-table-wrap" }, h("table", { class: "cov-commits" },
+      coverageColumns(),
+      h("tbody", {},
+        shown.map((c) => coverageCommit(c, row.url, false)),
+        open.length > shown.length ? h("tr", {}, h("td", { colspan: 6, class: "note" }, `…and ${open.length - shown.length} more not on production`)) : null,
+        done.length ? h("tr", { class: "cov-toggle" }, h("td", { colspan: 6 }, toggle)) : null,
+        doneRows))));
+}
+
+const COVERAGE_STAGE = { "before qa": "Before QA", "in qa": "In QA", "qa blocked": "QA blocked", "qa approved": "QA approved", live: "Live" };
+const COVERAGE_FLAG_TONE = { missing: "overdue", warn: "soon" };
+const hasFlags = (t) => Boolean(t.flags && t.flags.length);
+
+function coverageTicket(t, checks) {
+  const [label, baseTone, hint] = COVERAGE_STATE[t.state] || [t.state, "", ""];
+  const tone = t.section === "dev" && t.state !== "dropped" ? "" : baseTone;  // not being on QA yet is normal in development
+  return h("section", { class: `card cov-card ${t.state}${hasFlags(t) ? " flagged" : ""}`, "data-issue": t.issue },
+    h("div", { class: "cov-head" },
+      h("a", { class: "issue", href: `#/task/${t.issue}` }, `#${t.issue}`),
+      openInTimeline(t.issue, t.url),
+      h("span", { class: "cov-title note", title: t.title }, t.title),
+      h("span", { class: `badge ${tone}`, title: hint }, label),
+      h("span", { class: "cov-statuses" },
+        t.timeline ? h("span", { class: "cov-status", title: "Where the task is in Timeline" },
+          h("span", { class: "note" }, "Timeline"), h("span", { class: "cov-stage" }, COVERAGE_STAGE[t.timeline.release_state] || t.timeline.release_state || "Unknown")) : null,
+        jiraColumns.length ? h("span", { class: "cov-jira", title: "Status on the Jira board. The pencil moves the card or adds the ticket to the board." },
+          h("span", { class: "note" }, "Jira"), jiraStatusCell({ issue_number: t.issue })) : null),
+      t.unread && t.unread.length ? h("span", { class: "note", title: "These repos could not be read, so the ticket may be incomplete." }, `not read: ${t.unread.join(", ")}`) : null),
+    hasFlags(t) ? h("ul", { class: "cov-flags" }, t.flags.map((f) =>
+      h("li", {}, h("span", { class: `badge ${COVERAGE_FLAG_TONE[f.level] || ""}` }, f.level === "missing" ? "Mismatch" : "Check"), " ", f.text))) : null,
+    Object.values(t.repos).map((row) => coverageRepo(row, checks)));
+}
+
+function coverageSection(key, tickets, checks, total) {
+  const [label, hint, attentionText] = COVERAGE_SECTIONS[key];
+  const flagged = tickets.filter((t) => t.attention).length;
+  const open = key in coverageView.open ? coverageView.open[key] : flagged > 0;
+  const shown = tickets.length === total ? String(total) : `${tickets.length} of ${total}`;  // the filter hides the rest
+  const details = h("details", { class: `cov-section${flagged ? " needs" : ""}`, open },
+    h("summary", { class: "cov-section-head" },
+      h("div", { class: "cov-section-top" },
+        h("span", { class: "cov-section-title", role: "heading", "aria-level": "2" }, label),
+        h("span", { class: "count", title: tickets.length === total ? "" : `${total} tickets in this section; the filter shows ${tickets.length}` }, shown),
+        flagged ? h("span", { class: "badge overdue" }, `${flagged} ${flagged === 1 && attentionText === "need attention" ? "needs attention" : attentionText}`) : h("span", { class: "note" }, "all as expected")),
+      h("div", { class: "cov-hint" }, hint)),
+    tickets.map((t) => coverageTicket(t, checks)));
+  details.addEventListener("toggle", () => { coverageView.open[key] = details.open; });
+  return details;
+}
+
+function coverageTile(value, label, tone, hint) {
+  return h("div", { class: `cov-tile ${tone || ""}`, title: hint || "" },
+    h("div", { class: "cov-tile-value" }, value), h("div", { class: "cov-tile-label" }, label));
+}
+
+function renderCoverage(report, results) {
+  const tickets = report.tickets;
+  const attention = tickets.filter((t) => t.attention);
+  const list = coverageView.filter === "all" ? tickets : attention;
+  const left = report.hidden ? report.hidden.closed + report.hidden.retired : 0;
+  const filter = (key, text, n) => {
+    const on = coverageView.filter === key;
+    const b = h("button", { type: "button", class: `cov-seg${on ? " on" : ""}`, "aria-pressed": String(on) }, text, h("span", { class: "n" }, n));
+    b.addEventListener("click", () => { coverageView.filter = key; renderCoverage(report, results); });
+    return b;
+  };
+  const sections = COVERAGE_SECTION_ORDER.map((key) => [key, list.filter((t) => (t.section || "unknown") === key)])
+    .filter(([, group]) => group.length);
+  const info = [
+    report.authors && report.authors.length ? ["Your commits as", report.authors.join(", ")] : null,
+    report.subscribed_only ? ["Only tickets", "you are subscribed to"] : null,
+  ].filter(Boolean);
+  put(results,
+    Object.entries(report.errors || {}).map(([repo, message]) => h("p", { class: "error", role: "alert" }, `${repo} could not be read: ${message}`)),
+    report.timeline_error ? h("p", { class: "error", role: "alert" }, `Timeline could not be read, so titles, sections and status checks are missing: ${report.timeline_error}`) : null,
+    h("div", { class: "cov-summary" },
+      coverageTile(tickets.length, "Tickets tracked", "", "Your tickets with commits, that you are subscribed to"),
+      coverageTile(attention.length, "Need attention", attention.length ? "bad" : "good", "Not where their Timeline stage says they should be"),
+      coverageTile(left, "Left out", "muted", report.hidden ? `${report.hidden.closed} closed in Timeline (left out for good), ${report.hidden.retired} old and fully on production (back when you commit something newer)` : "")),
+    h("div", { class: "cov-controls" },
+      h("div", { class: "cov-segmented", role: "group", "aria-label": "Which tickets to show" },
+        filter("attention", "Needs attention", attention.length), filter("all", "All tickets", tickets.length)),
+      h("div", { class: "cov-info" }, info.map(([a1, b1]) => h("span", { class: "cov-info-chip" }, a1, " ", h("strong", {}, b1))))),
+    sections.length ? sections.map(([key, group]) => coverageSection(key, group, report.checks, tickets.filter((t) => (t.section || "unknown") === key).length))
+      : h("p", { class: "cov-empty" }, tickets.length ? "Nothing needs attention. Every ticket is where its Timeline stage says it should be." : "No tickets found in the last 12 months of your commits."));
+}
+
+async function checkCoverage(results, stamp, button, force) {
+  button.disabled = true;
+  let started = 0;
+  try {
+    let { report } = await api("/api/coverage");
+    if (report) {
+      renderCoverage(report, results);
+      stamp.textContent = `Checked ${ago(utc(report.generated_at))}`;
+    }
+    const stale = !report || Date.now() - new Date(utc(report.generated_at)).getTime() > COVERAGE_STALE_MS;
+    if (force || stale) {
+      started = Date.now();
+      stamp.textContent = "Checking…";
+      if (!report) put(results, h("p", { class: "note" }, "Reading git in both repositories…"));
+      const poll = setInterval(async () => {
+        try {
+          const { step } = await api("/api/coverage");
+          if (step) stamp.textContent = `${step}… (${Math.round((Date.now() - started) / 1000)} s)`;
+        } catch { /* the build request reports real errors */ }
+      }, 700);
+      try {
+        ({ report } = await api("/api/coverage", { method: "POST", headers: { "X-Timeline-Desk": "1" } }));
+      } finally {
+        clearInterval(poll);
+      }
+      renderCoverage(report, results);
+      stamp.textContent = `Checked ${ago(utc(report.generated_at))}`;
+    }
+  } catch (error) {
+    stamp.textContent = "";
+    results.prepend(h("p", { class: "error", role: "alert" }, error.message));
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function showCoverage(force) {
+  // The Jira board's columns and the column each ticket is in; without the board the Jira control is left out.
+  const jira = await api("/api/jira/board").catch(() => null);
+  jiraStatuses = new Map(jira ? jira.cards.map((c) => [String(c.issue_number), c.status]) : []);
+  jiraColumns = jira ? jira.statuses : [];
+  const results = h("div", { id: "coverage-results" });
+  const stamp = h("span", { class: "cov-stamp" });
+  const check = h("button", { type: "button", class: "btn" }, "Check again");
+  check.addEventListener("click", () => checkCoverage(results, stamp, check, true));
+  put(view, h("div", { class: "cov-page" },
+    h("div", { class: "cov-page-head" }, check, stamp),
+    results));
+  await checkCoverage(results, stamp, check, Boolean(force));
+}
+
 // ---- where a page's data comes from ---------------------------------------
 // Icons only: a green signal = read from Timeline when the page opens or refreshes, a blue database = our
 // stored copy (SQLite), an amber branch = git and GitHub. A page that mixes sources shows each one.
@@ -2565,7 +2807,7 @@ const SOURCE_ICONS = {
 };
 const PAGE_SOURCES = {
   planner: ["live", "cache", "db", "git"], workflows: ["live", "cache", "db"], changes: ["db"], timeline: ["db"],
-  release: ["cache", "git"], task: ["live", "db", "git"], work: ["git"], jira: ["live", "db"],
+  release: ["cache", "git"], coverage: ["db", "git"], task: ["live", "db", "git"], work: ["git"], jira: ["live", "db"],
 };
 
 function sourceIcons(kinds) {
@@ -2590,6 +2832,7 @@ const HELP_TOPIC_ICON = {
   changes: "M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7",
   timeline: "M12 2v20M12 6h7M12 12H5M12 18h7",
   release: "M12 2l4 8h-8zM12 10v12M8 22h8",
+  coverage: "M9 11l3 3 8-8M3 12a9 9 0 1 0 9-9",
   task: "M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9",
   work: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
   jira: "M4 4h5v16H4zM10 4h5v10h-5zM16 4h4v6h-4z",
@@ -2614,7 +2857,8 @@ async function showHelp(arg) {
   loading("Loading help…");
   const about = await api("/api/about").catch(() => null);
   const sched = about && about.schedule;
-  const fill = (text) => text.replace("{planner_cache}", about ? String(about.planner_cache_minutes) : "5");
+  const fill = (text) => text.replace("{planner_cache}", about ? String(about.planner_cache_minutes) : "5")
+    .replace("{coverage_off}", sched ? String(sched.coverage_off_hours_minutes) : "180").replace("{coverage}", sched ? String(sched.coverage_minutes) : "60");
   const icon = (k) => h("span", { class: `src ${k}` }, svgIcon(SOURCE_ICONS[k].path, 16));
   const list = (items) => items && items.length ? h("ul", { class: "help-list" }, items.map((t) => h("li", {}, fill(t)))) : null;
   const block = (id, title, ...children) => h("section", { class: "help-page", id: `help-${id}` }, h("h3", {}, title), ...children);
@@ -2729,6 +2973,7 @@ async function route(force) {
     if (name === "changes") await showChanges(false, force);
     else if (name === "timeline") await showTimeline(force);
     else if (name === "release") await showRelease(force);
+    else if (name === "coverage") await showCoverage(force);
     else if (name === "work") await showWork();
     else if (name === "jira") await showJira();
     else if (name === "workflows") await showWorkflows(arg);

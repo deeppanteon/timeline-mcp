@@ -1247,6 +1247,51 @@ def _open_planner_db(base_dir: Optional[str], create: bool) -> Optional[sqlite3.
         conn.execute("ALTER TABLE jira_cards ADD COLUMN support INTEGER NOT NULL DEFAULT 0")
         conn.execute("PRAGMA user_version = 10")
         conn.commit()
+    if conn.execute("PRAGMA user_version").fetchone()[0] < 11:
+        # Release coverage (see release_coverage.py): every commit of your tickets that was seen, and when it was
+        # first and last seen on qa-release and on production, so a commit that vanished from them shows as dropped.
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS coverage_commits (
+                repo TEXT NOT NULL,
+                sha TEXT NOT NULL,
+                issue_number TEXT NOT NULL,
+                branch TEXT,
+                author TEXT,
+                email TEXT,
+                committed_at TEXT,
+                subject TEXT,
+                first_seen TEXT NOT NULL,
+                in_qa INTEGER NOT NULL DEFAULT 0,
+                in_prod INTEGER NOT NULL DEFAULT 0,
+                qa_first_seen TEXT,
+                qa_last_seen TEXT,
+                prod_first_seen TEXT,
+                prod_last_seen TEXT,
+                PRIMARY KEY (repo, sha)
+            );
+            CREATE INDEX IF NOT EXISTS coverage_commits_issue ON coverage_commits (repo, issue_number);
+            CREATE TABLE IF NOT EXISTS coverage_checks (
+                repo TEXT PRIMARY KEY,
+                checked_at TEXT NOT NULL,
+                error TEXT
+            );
+            """
+        )
+        conn.execute("PRAGMA user_version = 11")
+        conn.commit()
+    if conn.execute("PRAGMA user_version").fetchone()[0] < 12:
+        # Tickets Timeline reports as closed are left out of release coverage for good: not looked up, not checked in git.
+        conn.execute("CREATE TABLE IF NOT EXISTS coverage_closed (issue_number TEXT PRIMARY KEY, closed_seen TEXT NOT NULL)")
+        conn.execute("PRAGMA user_version = 12")
+        conn.commit()
+    if conn.execute("PRAGMA user_version").fetchone()[0] < 13:
+        # Old tickets that are fully on production: hidden from release coverage and not read again until you commit
+        # something newer for them (last_commit_at is the newest commit they had when they were hidden).
+        conn.execute("CREATE TABLE IF NOT EXISTS coverage_retired (issue_number TEXT PRIMARY KEY, "
+                     "last_commit_at TEXT NOT NULL, retired_at TEXT NOT NULL)")
+        conn.execute("PRAGMA user_version = 13")
+        conn.commit()
     return conn
 
 

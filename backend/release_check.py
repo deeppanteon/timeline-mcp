@@ -381,10 +381,12 @@ GUARD_NEEDS_POS = {
 }
 PROD_BASES = ("master", "prod-release")  # the base that updates the production server, per repository
 # What differs per repository: its GitHub slug, the bases a ticket PR can go into, what a stage
-# promises, and whether the branch is searched for `.env.dist` / entity changes (duell-admin only).
+# promises, whether the branch is searched for `.env.dist` / entity changes (duell-admin only), and the
+# `work_base` ticket branches start from (release_coverage lists a branch's own commits against it).
 REPO_SPECS = {
-    ADMIN: {"slug": REPO, "bases": BASES, "needs": GUARD_NEEDS, "analyze": True},
-    POS: {"slug": "Panteon-norway/duell-pos", "bases": ("qa-release", "prod-release"), "needs": GUARD_NEEDS_POS, "analyze": False},
+    ADMIN: {"slug": REPO, "bases": BASES, "needs": GUARD_NEEDS, "analyze": True, "work_base": "development"},
+    POS: {"slug": "Panteon-norway/duell-pos", "bases": ("qa-release", "prod-release"), "needs": GUARD_NEEDS_POS, "analyze": False,
+          "work_base": "v4-release"},
 }
 _LEVEL_ORDER = {"ok": 0, "warn": 1, "missing": 2}
 _ISSUE_ID = re.compile(r"\d{3,6}")
@@ -962,9 +964,10 @@ def build_report(
     project_ok: Optional[Callable[[Any], bool]] = None,
     pos_dir: Optional[str] = None,
     only_mine: bool = False,
+    progress: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
     """
-    Builds the whole release overview. `status_lookup(ids)` returns
+    Builds the whole release overview. `progress(step)` is told which step is running. `status_lookup(ids)` returns
     get_task_statuses rows; if it raises (auth, network) the git and GitHub
     parts are still returned, with `timeline_error` set.
 
@@ -980,13 +983,17 @@ def build_report(
     path = repo_dir or default_repo_dir()
     repo = open_repo(path, runner)
     today = today or dt.date.today()
+    step = progress or (lambda _text: None)
 
     if fetch:
+        step("Fetching qa-release and master from GitHub")
         repo.run("git", "fetch", "--quiet", "origin", "qa-release", "master", timeout=90)
+    step("Reading git history")
     merges = qa_merges(repo)
     in_master = set(repo.run("git", "rev-list", "origin/master").split())
     on_qa = set(repo.run("git", "rev-list", "origin/master..origin/qa-release").split()) | in_master
 
+    step("Listing pull requests and releases")
     with ThreadPoolExecutor(max_workers=4) as pool:
         open_qa = pool.submit(repo.gh_json, "pr", "list", "--base", "qa-release", "--state", "open", "--limit", "100", "--json", PR_FIELDS)
         open_master = pool.submit(repo.gh_json, "pr", "list", "--base", "master", "--state", "open", "--limit", "100", "--json", PR_FIELDS)
@@ -1012,6 +1019,7 @@ def build_report(
     statuses: Dict[str, Dict[str, Any]] = {}
     timeline_error = None
     if ids and status_lookup:
+        step(f"Looking up {len(ids)} tickets in Timeline")
         try:
             statuses = {row["issue_id"]: row for row in status_lookup(ids)}
         except Exception as exc:  # auth or network: still show the git side
@@ -1077,6 +1085,7 @@ def build_report(
             continue
         guard_tickets.append({"issue_id": issue_id, "title": row["title"], "release_state": row["release_state"],
                               "stage_status": row.get("stage_status")})
+    step("Checking PR guard (duell-admin branches)")
     pr_index = build_pr_index(raw_prs, {"qa-release": merged_qa_prs, "master": merged_master_prs})
     try:  # one call lists every branch; if GitHub can't be reached the button stays available (the draft checks again)
         branch_index = parse_branch_index(repo.run("git", "ls-remote", "--heads", "origin", timeout=60))
@@ -1085,6 +1094,7 @@ def build_report(
     facts: Dict[str, Optional[Dict[str, Any]]] = {
         ADMIN: {"pr_index": pr_index, "branch_index": branch_index, "on_qa": qa_branches}}
     guard_errors: Dict[str, str] = {}
+    step("Checking PR guard (duell-pos)")
     try:
         facts[POS] = repo_facts(pos_dir, POS, runner)
     except ReleaseCheckError as exc:
@@ -1101,6 +1111,7 @@ def build_report(
     guard = pr_guard(guard_tickets, facts, guard_errors)
     guard["timeline_error"] = timeline_error
 
+    step("Building release notes")
     # Ticket rows for the view.
     ticket_rows = []
     for t in tickets:

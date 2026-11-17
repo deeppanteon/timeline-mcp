@@ -871,3 +871,13 @@ def test_parse_commits():
     assert pc.parse_commits(items) == [
         {"id": 2, "author": "Ann", "created_at": "01.10.2026 11:00", "message": "Fix it",
          "url": "https://github.com/o/r/commit/abc1234"}]
+
+
+def test_extract_task_status_deadline_and_hours():
+    raw = {"data": {"deadline": "2026-12-01T00:00:00", "hours_spent": "108,42", "estimated_hours": "12"}}
+    status = pc.extract_task_status(raw, "1")
+    assert status["deadline"] == "2026-12-01"
+    assert status["hours_spent"] == 108.42
+    assert status["hours_estimated"] == 12.0
+    empty = pc.extract_task_status({"data": {}}, "2")
+    assert empty["deadline"] is None and empty["hours_spent"] is None

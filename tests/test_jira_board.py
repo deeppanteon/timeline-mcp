@@ -231,3 +231,24 @@ class TestDashboard:
         assert client.delete("/api/jira/cards/5", headers=self.G).json()["card"]["issue_number"] == "5"
         assert client.get("/api/jira/board").json()["cards"] == []
         assert client.delete("/api/jira/cards/5", headers=self.G).status_code == 404
+
+
+def test_task_overview_collects_status_details_and_newest_events(monkeypatch):
+    raw = {"data": {"id": 7, "issue_number": 5, "title": "T", "description": "d" * 2000, "project_id": 1,
+                    "deadline": "2026-12-01", "hours_spent": "2,5", "estimated_hours": "5", "stage_dev": 2,
+                    "task_creator": {"name": "Ann"}, "created_at": "2026-11-01T10:00:00"}}
+    items = [
+        {"id": 1, "created_at": "01.11.2026 10:00", "field_name": "Status", "original_value": "a", "updated_value": "b",
+         "employee": {"name": "Bo"}},
+        {"id": 2, "created_at": "02.11.2026 09:00", "field_name": "Comment Added",
+         "task_comment": {"description": "x" * 900}, "employee": {"name": "Cy"}},
+    ]
+    monkeypatch.setattr(pc, "get_task_by_issue", lambda issue, headers: raw)
+    monkeypatch.setattr(pc, "get_task_timeline", lambda task_id, headers: items)
+    out = jb.task_overview("5", {})
+    assert out["stages"]["Development"] == "in progress"
+    assert out["hours_spent"] == 2.5 and out["hours_estimated"] == 5.0 and out["deadline"] == "2026-12-01"
+    assert [e["id"] for e in out["events"]] == [2, 1]  # newest first
+    assert out["events"][0]["body"].endswith("…") and len(out["events"][0]["body"]) <= jb.OVERVIEW_TEXT + 1
+    assert out["events"][1]["old"] == "a" and out["events"][1]["new"] == "b"
+    assert len(out["description"]) <= 1501

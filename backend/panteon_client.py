@@ -359,6 +359,14 @@ def release_state(stages: Dict[str, Optional[int]]) -> str:
     return "before qa"
 
 
+def _hours(value: Any) -> Optional[float]:
+    """Timeline sends hours as numbers or strings with a decimal comma ("108,42"); None when missing."""
+    try:
+        return float(str(value).replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+
+
 def extract_task_status(raw_task: Dict[str, Any], issue_id: str) -> Dict[str, Any]:
     """
     Pulls the workflow status out of an API-1 (taskbyissue) response:
@@ -376,6 +384,9 @@ def extract_task_status(raw_task: Dict[str, Any], issue_id: str) -> Dict[str, An
         "project_id": data.get("project_id"),
         "task_status": data.get("task_status") or "",
         "stage_status": data.get("stage_status") or "",
+        "deadline": _normalize_date(data.get("deadline") or "") or None,
+        "hours_spent": _hours(data.get("hours_spent")),
+        "hours_estimated": _hours(data.get("estimated_hours")),
         "stages": {
             label: STAGE_PROGRESS.get(codes[field], "unknown") for field, label in TASK_STAGES.items()
         },

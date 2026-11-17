@@ -1438,6 +1438,22 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeJiraM
 window.addEventListener("resize", closeJiraMenu);
 window.addEventListener("hashchange", closeJiraMenu);
 
+// The "Move to" / "Add to board in" menu under a pencil button; onPick gets the chosen column.
+function openJiraMenu(anchor, issue, current, columns, onPick) {
+  jiraMenu = h("div", { class: "jira-menu", role: "menu", "data-issue": issue },
+    h("p", { class: "note" }, current ? "Move to" : "Add to board in"),
+    columns.map((c) => h("button", {
+      type: "button", role: "menuitem", class: c === current ? "current" : "", style: `--sc:${jiraHue(c, columns)}`,
+      onclick: (e) => { e.preventDefault(); e.stopPropagation(); onPick(c); },
+    }, c)));
+  anchor.setAttribute("aria-expanded", "true");
+  document.body.appendChild(jiraMenu);
+  const box = anchor.getBoundingClientRect();
+  const mh = jiraMenu.offsetHeight;
+  jiraMenu.style.left = `${Math.max(8, Math.min(box.left, window.innerWidth - jiraMenu.offsetWidth - 8))}px`;
+  jiraMenu.style.top = `${box.bottom + mh + 8 > window.innerHeight ? Math.max(8, box.top - mh - 4) : box.bottom + 4}px`;
+}
+
 // The Status cell of a task row: the Jira column as a coloured chip (a dash when the task is not on the board)
 // and a pencil that moves the card, or adds the task to the board in the column you pick.
 function jiraStatusCell(t) {
@@ -1477,21 +1493,7 @@ function jiraStatusCell(t) {
       toast(err.message, true);
     }
   };
-  const openMenu = (anchor) => {
-    const current = jiraStatus(t);
-    jiraMenu = h("div", { class: "jira-menu", role: "menu", "data-issue": issue },
-      h("p", { class: "note" }, current ? "Move to" : "Add to board in"),
-      jiraColumns.map((c) => h("button", {
-        type: "button", role: "menuitem", class: c === current ? "current" : "", style: `--sc:${jiraHue(c, jiraColumns)}`,
-        onclick: (e) => { e.preventDefault(); e.stopPropagation(); choose(c); },
-      }, c)));
-    anchor.setAttribute("aria-expanded", "true");
-    document.body.appendChild(jiraMenu);
-    const box = anchor.getBoundingClientRect();
-    const mh = jiraMenu.offsetHeight;
-    jiraMenu.style.left = `${Math.max(8, Math.min(box.left, window.innerWidth - jiraMenu.offsetWidth - 8))}px`;
-    jiraMenu.style.top = `${box.bottom + mh + 8 > window.innerHeight ? Math.max(8, box.top - mh - 4) : box.bottom + 4}px`;
-  };
+  const openMenu = (anchor) => openJiraMenu(anchor, issue, jiraStatus(t), jiraColumns, choose);
   draw();
   return cell;
 }
@@ -2314,6 +2316,10 @@ async function showJira() {
   const data = await api("/api/jira/board");
   const cards = data.cards;
   let query = "";
+  let kind = "all";       // all | task | support
+  let focus = "";         // a column picked on the status bar
+  let selected = "";      // the card shown in the detail panel
+  const recent = [];      // moves made on this page, newest first: {at, card, from, to}
   let dragging = null;
   const error = h("p", { class: "error", role: "alert", hidden: true });
   const fail = (e) => { error.textContent = e.message; error.hidden = false; };
@@ -2397,11 +2403,9 @@ async function showJira() {
 
   const card = (c) => h("div", {
     style: sectionColor(c.status),
-    class: `card jira-card${c.support ? " support" : " task"}`,
-    title: c.title,
+    class: `card jira-card${c.support ? " support" : " task"}${String(c.issue_number) === selected ? " sel" : ""}`,
     "data-issue": c.issue_number,
-    onmouseenter: () => hover(c.issue_number, true),
-    onmouseleave: () => hover(c.issue_number, false),
+    onclick: (e) => { if (!e.target.closest("a")) { selected = String(c.issue_number); draw(); } },
     draggable: "true",
     ondragstart: (e) => {
       dragging = c;
@@ -2418,16 +2422,20 @@ async function showJira() {
     h("div", { class: "head" },
       h("a", { class: "issue", href: `#/task/${c.issue_number}`, draggable: "false" }, `#${c.issue_number}`),
       c.support ? h("span", { class: "badge support s-pill", title: "Support task" }, "S") : null,
+      c.closed ? h("span", { class: "badge closed" }, "closed") : null,
       c.url ? h("a", { class: "ext", href: c.url, target: "_blank", rel: "noopener noreferrer", draggable: "false", title: "Open in Timeline" }, "↗") : null),
-    );
+    h("div", { class: "title" }, c.title),
+    h("div", { class: "meta" },
+      h("span", { class: "due", title: "Deadline" }, c.deadline ? niceDate(c.deadline, false) : "no deadline", flagBadge(c.deadline_flag)),
+      h("span", { class: "hrs", title: "Hours spent / estimated" }, hoursText(c))));
 
+  const visible = (c) => (!query || `${c.issue_number} ${c.title}`.toLowerCase().includes(query))
+    && (kind === "all" || (kind === "support") === !!c.support);
   const column = (status) => {
-    const items = cards.filter((c) => c.status === status && (!query || `${c.issue_number} ${c.title}`.toLowerCase().includes(query)));
+    const items = cards.filter((c) => c.status === status && visible(c));
     return h("section", {
-      class: "jira-col",
+      class: `jira-col${focus && focus !== status ? " dim" : ""}`,
       style: sectionColor(status),
-      onmouseenter: () => hoverSection(status, true),
-      onmouseleave: () => hoverSection(status, false),
       ondragover: (e) => { if (dragging) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; e.currentTarget.classList.add("drop"); } },
       ondragleave: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) e.currentTarget.classList.remove("drop"); },
       ondrop: async (e) => {
@@ -2444,18 +2452,7 @@ async function showJira() {
           }
           return;
         }
-        if (!moved || moved.status === status) return;
-        const before = moved.status;
-        moved.status = status;  // shown at once, undone if the server refuses
-        error.hidden = true;
-        draw();
-        try {
-          await postJson(`/api/jira/cards/${moved.issue_number}/move`, { status });
-        } catch (err) {
-          moved.status = before;
-          fail(err);
-          draw();
-        }
+        if (moved) moveCard(moved, status);
       },
     },
       h("h2", {}, h("span", { class: "jira-col-name" }, status), h("span", { class: "pill" }, String(items.length)),
@@ -2469,82 +2466,166 @@ async function showJira() {
     try {
       await api(`/api/jira/cards/${c.issue_number}`, { method: "DELETE", headers: { "X-Timeline-Desk": "1" } });
       cards.splice(cards.indexOf(c), 1);
+      if (selected === String(c.issue_number)) selected = "";
       draw();
     } catch (err) {
       fail(err);
     }
   }
 
-  // Left: the tasks on the board (name + ID + status). Hovering a card or a row highlights its twin.
-  const taskList = h("ul", { class: "jira-tasks" });
-  const taskNote = h("p", { class: "note", hidden: true });
-  const hover = (issue, on) => {
-    for (const el of view.querySelectorAll(`[data-issue="${issue}"]`)) el.classList.toggle("hl", on);
-    const row = taskList.querySelector(`[data-issue="${issue}"]`);
-    const sec = row && taskList.querySelector(`.jira-task-sec[data-status="${row.dataset.status}"]`);
-    if (sec) sec.classList.toggle("hl-sec", on);  // its section header lights up too
-    if (on && row) scrollIntoList(row);
-  };
-  const hoverSection = (status, on) => {
-    let first = null;
-    for (const el of taskList.children) {
-      const hit = on && el.dataset.status === status;
-      el.classList.toggle("hl-sec", hit);
-      if (hit && !first) first = el;
+  // Moves a card at once and undoes it if the server refuses (drag and drop and the detail panel both come here).
+  async function moveCard(c, status, log = true) {
+    closeJiraMenu();
+    if (!c || c.status === status) return;
+    const before = c.status;
+    c.status = status;
+    error.hidden = true;
+    if (log) {
+      recent.unshift({ at: new Date(), card: c, from: before, to: status });
+      recent.length = Math.min(recent.length, 5);
     }
-    if (first) scrollIntoList(first);
-  };
-  // Scrolls only the list (never the page) so the row is visible.
-  const scrollIntoList = (row) => {
-    const side = taskList.parentElement;
-    const r = row.getBoundingClientRect(), s = side.getBoundingClientRect();
-    if (r.top < s.top + 30) side.scrollTop -= s.top + 30 - r.top;
-    else if (r.bottom > s.bottom) side.scrollTop += r.bottom - s.bottom + 4;
-  };
-  function drawTasks() {
-    const rank = (c) => data.statuses.indexOf(c.status);
-    const shown = cards.filter((c) => !query || `${c.issue_number} ${c.title}`.toLowerCase().includes(query))
-      .sort((a, b) => rank(a) - rank(b));  // by column; the order they were added within one
-    taskNote.textContent = "No tasks on the board.";
-    taskNote.hidden = shown.length > 0;
-    const rows = [];
-    for (const status of data.statuses) {
-      const inSection = shown.filter((c) => c.status === status);
-      if (!inSection.length) continue;  // empty sections stay hidden
-      rows.push(h("li", { class: "jira-task-sec", "data-status": status, style: sectionColor(status) },
-        status, h("span", { class: "pill" }, String(inSection.length))));
-      for (const c of inSection) {
-        rows.push(h("li", {
-          class: `jira-task${c.support ? " support" : ""}`,
-          style: sectionColor(status),
-          "data-issue": c.issue_number,
-          "data-status": c.status,
-          onmouseenter: () => hover(c.issue_number, true),
-          onmouseleave: () => hover(c.issue_number, false),
-        },
-          h("div", { class: "row" },
-            h("a", { class: "issue", href: `#/task/${c.issue_number}` }, `#${c.issue_number}`),
-            h("span", { class: "pill status" }, c.status),
-            c.closed ? h("span", { class: "badge closed" }, "closed") : null,
-            c.support ? h("span", { class: "badge support" }, "support") : h("span", { class: "badge task" }, "task")),
-          h("div", { class: "name" }, c.title)));
-      }
+    draw();
+    try {
+      await postJson(`/api/jira/cards/${c.issue_number}/move`, { status });
+    } catch (err) {
+      c.status = before;
+      if (log) recent.shift();
+      fail(err);
+      draw();
     }
-    put(taskList, rows);
   }
-  function draw() { put(board, data.statuses.map(column)); drawTasks(); }
 
-  // Dropping a card here is the only way to take it off the board.
-  const trash = h("div", {
-    class: "jira-trash",
-    ondragover: (e) => { if (dragging) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; e.currentTarget.classList.add("drop"); } },
-    ondragleave: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) e.currentTarget.classList.remove("drop"); },
-    ondrop: (e) => {
-      e.preventDefault();
-      e.currentTarget.classList.remove("drop");
-      if (dragging && !dragging.task) removeCard(dragging);
-    },
-  }, "Drop a card here to delete it");
+  // The status bar: one segment per column, as wide as its cards. Click one to focus that column.
+  const flow = h("div", { class: "jira-flow" });
+  const flowNote = h("p", { class: "note" });
+  function drawFlow() {
+    const segs = data.statuses.map((status) => {
+      const n = cards.filter((c) => c.status === status && visible(c)).length;
+      return { status, n };
+    }).filter((x) => x.n || x.status === focus);
+    put(flow, segs.map(({ status, n }) => h("button", {
+      type: "button", class: status === focus ? "on" : "", style: `${sectionColor(status)}; flex: ${Math.max(n, 1)} 1 0`,
+      title: `${status}: ${n}`,
+      onclick: () => { focus = focus === status ? "" : status; draw(); },
+    }, `${status} ${n}`)));
+    const total = cards.filter(visible).length;
+    flowNote.textContent = `${total} task${total === 1 ? "" : "s"} on the board${focus ? ` · focused on ${focus} (click it again to clear)` : ""}`;
+  }
+
+  // The task panel: the selected card with everything about the task (status, details, history), so the
+  // task page doesn't need opening. One backend call per task (/api/jira/task), remembered for a minute.
+  const detail = h("div", { class: "jira-detail" });
+  const overviews = new Map();  // issue -> {at, data}
+  let historyKind = "all";
+  const STAGE_CLASS = { "done": "done", "in progress": "doing", "blocked": "blocked", "skipped": "skipped", "not started": "todo" };
+  const KIND_ICON = { status: "●", field: "✎", comment: "❝", commit: "⎇", created: "★" };
+  const KIND_FILTER = { all: null, changes: ["status", "field", "created"], comments: ["comment"], commits: ["commit"] };
+
+  async function loadOverview(issue, force) {
+    const hit = overviews.get(issue);
+    if (!force && hit && Date.now() - hit.at < 60000) return hit.data;
+    const data = await api(`/api/jira/task/${encodeURIComponent(issue)}`);
+    overviews.set(issue, { at: Date.now(), data });
+    return data;
+  }
+
+  function statusBlock(o, c) {
+    const spent = Number(o.hours_spent) || 0, est = Number(o.hours_estimated) || 0;
+    const pct = est > 0 ? Math.min(100, Math.round((spent / est) * 100)) : 0;
+    return h("section", { class: "jd-box" }, h("h4", {}, "Status"),
+      h("div", { class: "jd-stages" }, Object.entries(o.stages).map(([label, state]) =>
+        h("span", { class: `jd-stage ${STAGE_CLASS[state] || "todo"}`, title: `${label}: ${state}` }, h("i", {}), label))),
+      h("dl", { class: "jd-kv" },
+        h("dt", {}, "Jira"), h("dd", {}, h("span", { class: "pill status", style: sectionColor(c.status) }, c.status)),
+        h("dt", {}, "Release"), h("dd", {}, o.release_state),
+        h("dt", {}, "Timeline"), h("dd", {}, o.stage_status || o.task_status || "–"),
+        h("dt", {}, "Deadline"), h("dd", {}, o.deadline ? niceDate(o.deadline, false) : "none", flagBadge(o.deadline_flag)),
+        h("dt", {}, "Hours"), h("dd", {}, hoursText({ hours_spent: o.hours_spent, hours_estimated: o.hours_estimated }),
+          est > 0 ? h("span", { class: `jd-bar${spent > est ? " over" : ""}`, title: `${pct}% of the estimate` }, h("i", { style: `width:${pct}%` })) : null)));
+  }
+
+  function detailsBlock(o) {
+    return h("section", { class: "jd-box" }, h("h4", {}, "Details"),
+      h("dl", { class: "jd-kv" },
+        h("dt", {}, "Created"), h("dd", {}, `${o.created ? niceDate(o.created, false) : "–"}${o.creator ? ` by ${o.creator}` : ""}`),
+        o.tags.length ? [h("dt", {}, "Tags"), h("dd", {}, o.tags.map((t) => h("span", { class: "tag" }, t)))] : null),
+      o.description ? h("div", { class: "jd-desc" }, richText(o.description)) : h("p", { class: "note" }, "No description."));
+  }
+
+  function eventLine(e) {
+    const when = e.at ? `${niceDate(e.at.slice(0, 10), false)} ${e.at.slice(11, 16)}` : "";
+    let text;
+    if (e.kind === "comment") text = e.body ? richText(e.body) : h("span", {}, "Comment");
+    else if (e.kind === "commit") text = e.url && /^https:\/\//.test(e.url)
+      ? h("a", { href: e.url, target: "_blank", rel: "noopener noreferrer" }, e.body || "Commit") : h("span", {}, e.body || "Commit");
+    else if (e.kind === "created") text = h("span", {}, "Task created");
+    else text = h("span", {}, h("b", {}, e.field), e.old != null || e.new != null ? `: ${e.old ?? "–"} → ${e.new ?? "–"}` : "");
+    return h("li", { class: `jd-ev ${e.kind}` },
+      h("span", { class: "ic", title: e.kind }, KIND_ICON[e.kind] || "•"),
+      h("div", {}, h("div", { class: "who" }, e.by || "Timeline", h("span", {}, when)), h("div", { class: "txt" }, text)));
+  }
+
+  function historyBlock(o, redraw) {
+    const only = KIND_FILTER[historyKind];
+    const shown = o.events.filter((e) => !only || only.includes(e.kind));
+    return h("section", { class: "jd-box jd-history" },
+      h("h4", {}, "History", h("span", { class: "jira-seg small" }, Object.keys(KIND_FILTER).map((k) => h("button", {
+        type: "button", class: k === historyKind ? "on" : "", onclick: () => { historyKind = k; redraw(); },
+      }, k[0].toUpperCase() + k.slice(1))))),
+      shown.length ? h("ul", { class: "jd-events" }, shown.map(eventLine)) : h("p", { class: "note" }, "Nothing here."));
+  }
+
+  function drawDetail() {
+    const c = cards.find((x) => String(x.issue_number) === selected);
+    if (!c) { put(detail, h("p", { class: "note" }, "Select a card to see its status, details and history here.")); return; }
+    const issue = String(c.issue_number);
+    const body = h("div", { class: "jd-cols" }, h("p", { class: "note" }, "Loading the task…"));
+    const fill = (o) => put(body, statusBlock(o, c), detailsBlock(o), historyBlock(o, () => fill(o)));
+    put(detail,
+      h("div", { class: "jd-head" },
+        h("div", { class: "jd-main" },
+          h("h3", {}, h("a", { href: `#/task/${c.issue_number}` }, `#${c.issue_number}`), " ", c.title),
+          h("div", { class: "jd-badges" },
+            c.support ? h("span", { class: "badge support" }, "support") : h("span", { class: "badge task" }, "task"),
+            c.closed ? h("span", { class: "badge closed" }, "closed") : null)),
+        h("div", { class: "jd-side" },
+          h("a", { class: "btn ghost small", href: `#/task/${c.issue_number}` }, "Open task page"),
+          c.url ? h("a", { class: "btn ghost small", href: c.url, target: "_blank", rel: "noopener noreferrer" }, "Open in Timeline ↗") : null,
+          h("button", { type: "button", class: "btn ghost small", title: "Reload from Timeline", onclick: () => {
+            overviews.delete(issue); drawDetail();
+          } }, "↻ Refresh"),
+          h("button", { type: "button", class: "btn ghost small danger", onclick: () => {
+            if (confirm(`Take #${c.issue_number} off the board?`)) removeCard(c);
+          } }, "Remove"))),
+      body);
+    loadOverview(issue).then((o) => { if (selected === issue && body.isConnected) fill(o); },
+      (err) => { if (selected === issue && body.isConnected) put(body, h("p", { class: "error" }, err.message)); });
+  }
+
+  // The footer: your latest moves (with Undo) and the box that takes a card off the board.
+  const recentBox = h("div", { class: "jf-list" });
+  function drawFooter() {
+    const time = (d) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    put(recentBox, recent.length
+      ? recent.map((r, i) => h("div", { class: "jf-move" },
+        h("span", { class: "t" }, time(r.at)),
+        h("span", { class: "x" }, h("b", {}, `#${r.card.issue_number}`), ` ${r.from} → ${r.to}`),
+        i === 0 && r.card.status === r.to
+          ? h("button", { type: "button", class: "btn ghost small", onclick: () => { recent.shift(); moveCard(r.card, r.from, false); } }, "Undo")
+          : null))
+      : h("p", { class: "note" }, "Nothing moved on this page yet."));
+  }
+  function draw() { put(board, data.statuses.map(column)); drawFlow(); drawDetail(); drawFooter(); }
+
+  const footer = h("div", { class: "jira-footer" },
+    h("section", {}, h("h4", {}, "Recent moves"), recentBox));
+
+  const kinds = h("div", { class: "jira-seg", role: "group", "aria-label": "Show" });
+  const drawKinds = () => put(kinds, [["all", "All"], ["task", "Tasks"], ["support", "Support"]].map(([k, label]) => h("button", {
+    type: "button", class: k === kind ? "on" : "", "aria-pressed": k === kind ? "true" : "false",
+    onclick: () => { kind = k; drawKinds(); draw(); },
+  }, label)));
+  drawKinds();
 
   put(view,
     h("div", { class: "toolbar" },
@@ -2552,11 +2633,12 @@ async function showJira() {
         type: "search", class: "jira-search", placeholder: "Search cards…", "aria-label": "Search cards",
         oninput: (e) => { query = e.target.value.trim().toLowerCase(); draw(); },
       }),
-      trash),
+      kinds, flow),
     error,
-    h("div", { class: "jira-layout" },
-      h("aside", { class: "jira-side" }, h("h2", {}, "My tasks on the board"), taskNote, taskList),
-      board),
+    flowNote,
+    board,
+    detail,
+    footer,
     picker);
   draw();
 
@@ -2564,7 +2646,7 @@ async function showJira() {
   const fit = () => {
     if (!board.isConnected) { window.removeEventListener("resize", fit); return; }
     const top = board.getBoundingClientRect().top + window.scrollY;
-    board.parentElement.style.setProperty("--board-h", `${Math.max(320, window.innerHeight - top - 52)}px`);
+    board.parentElement.style.setProperty("--board-h", `${Math.max(300, window.innerHeight - top - 250)}px`);
   };
   fit();
   window.addEventListener("resize", fit);

@@ -663,10 +663,15 @@ def create_app(
             closed = closed_issues([c["issue_number"] for c in data["cards"]])
             for card in data["cards"]:
                 card["closed"] = card["issue_number"] in closed
+                info = closed_cache.get(card["issue_number"], (0, False, {}))[2]
+                card["deadline"] = info.get("deadline")
+                card["deadline_flag"] = panteon_client.deadline_flag(info.get("deadline"))
+                card["hours_spent"] = info.get("hours_spent")
+                card["hours_estimated"] = info.get("hours_estimated")
             return data
         return _respond(load)
 
-    closed_cache: Dict[str, Any] = {}  # issue -> (checked_at, is_closed); a closed task rarely reopens
+    closed_cache: Dict[str, Any] = {}  # issue -> (checked_at, is_closed, deadline/hours); a closed task rarely reopens
 
     def closed_issues(issues):
         """The issues Timeline reports as closed (task_status), one taskbyissue call each, remembered for 10 minutes.
@@ -677,7 +682,8 @@ def create_app(
             try:
                 for row in panteon_client.get_task_statuses(stale, headers()):
                     if not row.get("error"):
-                        closed_cache[str(row["issue_id"])] = (now, row.get("task_status") == "closed")
+                        closed_cache[str(row["issue_id"])] = (now, row.get("task_status") == "closed", {
+                            k: row.get(k) for k in ("deadline", "hours_spent", "hours_estimated")})
             except (PermissionError, LookupError, ValueError, requests.RequestException):
                 pass
         return {i for i in issues if closed_cache.get(i, (0, False))[1]}
@@ -697,6 +703,9 @@ def create_app(
                 raise ValueError(f"Task #{row['issue_id']} is closed.")
             found[str(row["issue_id"])] = {"title": row.get("title") or "", "code": codes.get(str(row.get("project_id")))}
         return found
+
+    def api_jira_task(request: Request):
+        return _respond(lambda: jira_board.task_overview(request.path_params["issue"], headers()))
 
     def api_jira_my_tasks(request: Request):
         return _respond(lambda: {"tasks": jira_board.list_my_tasks(headers(), jira_projects(), resolved_user())})
@@ -755,6 +764,7 @@ def create_app(
     routes = [
         Route("/", index),
         Route("/api/jira/board", api_jira_board),
+        Route("/api/jira/task/{issue}", api_jira_task),
         Route("/api/jira/my-tasks", api_jira_my_tasks),
         Route("/api/jira/support-tasks", api_jira_support_tasks),
         Route("/api/jira/cards", api_jira_add, methods=["POST"]),

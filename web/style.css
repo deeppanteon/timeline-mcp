@@ -1037,7 +1037,7 @@ a:hover > .tl-sha { border-color: #c4a5ff; }
 }
 .jira-cell .pill.status::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: hsl(var(--sc) 70% 62%); }
 .jira-edit { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border-radius: 6px; border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer; opacity: 0; transition: opacity 0.12s; }
-a.trow:hover .jira-edit, .jira-edit:focus-visible, .jira-edit[aria-expanded="true"] { opacity: 1; }
+a.trow:hover .jira-edit, .jira-task:hover .jira-edit, .jira-edit:focus-visible, .jira-edit[aria-expanded="true"] { opacity: 1; }
 @media (hover: none) { .jira-edit { opacity: 1; } }
 .jira-edit:hover, .jira-edit:focus-visible { border-color: var(--accent); color: var(--accent-ink); background: var(--surface-2); }
 .jira-edit.jira-addchip { opacity: 1; width: 148px; height: 24px; justify-content: flex-start; padding: 0 10px; gap: 0; border-radius: 999px; font: 600 12px var(--font); }
@@ -1215,3 +1215,95 @@ a.trow:hover .jira-addchip, .jira-addchip:focus-visible { border: 1px dashed var
 .cov-commits tr.cov-toggle td { padding: 0; background: none; border: 0; }
 .cov-toggle-btn { display: block; width: 100%; padding: 9px 10px; text-align: left; font: inherit; font-size: 15px; font-weight: 700; color: var(--ink); background: none; border: 0; cursor: pointer; }
 .cov-toggle-btn:hover { color: var(--accent-ink); text-decoration: underline; }
+
+/* ---- jira: status bar, board, detail panel ---- */
+.jira-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.jira-seg button { background: transparent; color: var(--muted); border: 0; border-left: 1px solid var(--line); padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+.jira-seg button:first-child { border-left: 0; }
+.jira-seg button.on { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent-ink); }
+.jira-flow { display: flex; gap: 2px; margin: 10px 0 4px; }
+.jira-flow button { min-width: 0; padding: 6px 8px; border: 0; border-radius: 4px; font: inherit; font-size: 12px; color: var(--ink); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: hsl(var(--sc) 60% 50% / 0.28); }
+.jira-flow button:hover { background: hsl(var(--sc) 60% 50% / 0.42); }
+.jira-flow button.on { background: hsl(var(--sc) 60% 50% / 0.6); font-weight: 600; box-shadow: 0 0 0 1px hsl(var(--sc) 70% 62%); }
+.jira-col.dim { opacity: 0.35; }
+.jira-card.sel { outline: 2px solid var(--accent); }
+.jira-card .title { margin-top: 4px; color: var(--muted); font-size: 12px; }
+.jira-card .badge.closed { margin-left: 0; }
+.jira-board { margin-top: 8px; }
+.jira-detail { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 16px; margin-top: 12px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.jira-detail h3 { margin: 0 0 6px; font-size: 15px; }
+.jira-detail h3 a { text-decoration: none; }
+.jira-detail .note { margin: 8px 0 4px; }
+.jd-badges { display: flex; gap: 6px; }
+.jd-moves { display: flex; flex-wrap: wrap; gap: 6px; }
+.jd-moves button { padding: 3px 12px; border-radius: 99px; font: inherit; font-size: 12px; color: var(--ink); cursor: pointer; border: 1px solid hsl(var(--sc) 55% 55%); background: hsl(var(--sc) 60% 50% / 0.14); }
+.jd-moves button:hover { background: hsl(var(--sc) 60% 50% / 0.3); }
+.jd-moves button.current { background: hsl(var(--sc) 60% 50% / 0.55); font-weight: 600; }
+.jd-side { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.jira-activity { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 10px; }
+.jira-activity-hint { margin-left: auto; }
+@media (max-width: 800px) { .jira-detail { grid-template-columns: 1fr; } }
+.jira-detail .btn.ghost.danger { background: var(--surface-2); color: var(--blocked); border-color: var(--blocked); }
+
+/* ---- jira: card meta and footer ---- */
+.jira-card .meta { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin-top: 6px; font-size: 11px; color: var(--muted); flex-wrap: wrap; }
+.jira-card .meta .due { display: inline-flex; align-items: center; gap: 4px; }
+.jira-footer { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.4fr) minmax(180px, 0.7fr); gap: 12px; margin-top: 12px; }
+.jira-footer > section, .jira-footer > .jira-trash { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; margin: 0; }
+.jira-footer h4 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.jf-list { display: flex; flex-direction: column; gap: 5px; }
+.jf-move { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.jf-move .t { color: var(--muted); font-variant-numeric: tabular-nums; }
+.jf-move .x { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jf-sum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.jf-stat { display: flex; flex-direction: column; padding: 6px 8px; border-radius: 6px; background: var(--surface-2); }
+.jf-stat b { font-size: 18px; }
+.jf-stat span { font-size: 11px; color: var(--muted); }
+.jf-stat.bad b { color: var(--blocked); }
+.jf-stat.warn b { color: var(--progress); }
+.jira-footer > .jira-trash { margin-left: 0; display: flex; flex-direction: column; justify-content: center; text-align: center; border-style: dashed; }
+.jira-footer > .jira-trash h4 { margin-bottom: 4px; }
+.jira-footer > .jira-trash p { margin: 0; font-size: 12px; }
+@media (max-width: 900px) { .jira-footer { grid-template-columns: 1fr; } }
+
+/* ---- jira: task panel (status, details, history) ---- */
+.jira-detail { display: block; }
+.jd-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+.jd-head .jd-main { min-width: 0; }
+.jd-head .jd-side { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; }
+.jd-moves { align-items: center; margin: 8px 0 10px; }
+.jd-moves .note { margin: 0 4px 0 0; }
+.jd-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.3fr); gap: 12px; }
+.jd-box { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; min-width: 0; }
+.jd-box h4 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.jd-stages { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+.jd-stage { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 99px; font-size: 11px; border: 1px solid var(--line); color: var(--muted); }
+.jd-stage i { width: 7px; height: 7px; border-radius: 50%; background: var(--line); }
+.jd-stage.done { color: var(--ink); border-color: var(--done); } .jd-stage.done i { background: var(--done); }
+.jd-stage.doing { color: var(--ink); border-color: var(--progress); } .jd-stage.doing i { background: var(--progress); }
+.jd-stage.blocked { color: var(--ink); border-color: var(--blocked); } .jd-stage.blocked i { background: var(--blocked); }
+.jd-stage.skipped { text-decoration: line-through; }
+.jd-kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 12px; }
+.jd-kv dt { color: var(--muted); }
+.jd-kv dd { margin: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.jd-bar { display: inline-block; width: 70px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.jd-bar i { display: block; height: 100%; background: var(--done); }
+.jd-bar.over i { background: var(--blocked); }
+.jd-desc { margin-top: 8px; max-height: 190px; overflow-y: auto; font-size: 12px; color: var(--muted); }
+.jd-history h4 .jira-seg.small button { padding: 2px 8px; font-size: 11px; text-transform: none; letter-spacing: 0; }
+.jd-events { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.jd-ev { display: flex; gap: 8px; font-size: 12px; }
+.jd-ev .ic { flex: none; width: 16px; text-align: center; color: var(--muted); }
+.jd-ev.status .ic { color: var(--progress); } .jd-ev.commit .ic { color: var(--done); } .jd-ev.comment .ic { color: var(--accent-ink); }
+.jd-ev .who { font-weight: 600; font-size: 11px; display: flex; gap: 8px; align-items: baseline; }
+.jd-ev .who span { color: var(--muted); font-weight: 400; }
+.jd-ev .txt { overflow-wrap: anywhere; color: var(--muted); max-height: 110px; overflow-y: auto; }
+.jd-ev .txt b { color: var(--ink); font-weight: 600; }
+.jira-footer { grid-template-columns: minmax(0, 1fr) minmax(180px, 0.35fr); }
+@media (max-width: 1000px) { .jd-cols { grid-template-columns: 1fr; } .jd-head { flex-direction: column; } }
+
+.jira-footer { grid-template-columns: 1fr; }
+
+.toolbar .jira-flow { flex: 1 1 360px; min-width: 0; margin: 0; }
+.toolbar .jira-flow button { padding: 7px 8px; }
+.jira-flow + .note, .toolbar ~ .note { margin: 6px 0 0; }

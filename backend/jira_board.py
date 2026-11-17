@@ -43,6 +43,46 @@ def list_cards(base_dir: Optional[str] = None) -> List[Dict[str, Any]]:
             for i, t, s, c, sp in rows]
 
 
+OVERVIEW_EVENTS = 60  # newest timeline events sent to the board's task panel
+OVERVIEW_TEXT = 600   # characters kept of a comment, commit message or description
+
+
+def _clip(text: Optional[str], limit: int = OVERVIEW_TEXT) -> Optional[str]:
+    text = (text or "").strip()
+    if not text:
+        return None
+    return text if len(text) <= limit else text[:limit].rstrip() + "…"
+
+
+def task_overview(issue: Any, headers: Dict[str, str]) -> Dict[str, Any]:
+    """
+    Everything the board's task panel shows for one task, from two Timeline calls (taskbyissue and the
+    timeline) and nothing stored: header, the six workflow stages, deadline and hours, and the newest
+    timeline events (status and field changes, comments, commits) with long text clipped.
+    """
+    issue_id = pc.extract_issue_id(str(issue))
+    raw = pc.get_task_by_issue(issue_id, headers)
+    meta = pc.extract_task_meta(raw)
+    status = pc.extract_task_status(raw, issue_id)
+    items = pc.get_task_timeline(pc.extract_task_id_from_data(raw), headers)
+    events = [e for e in (task_events.parse_event(i, issue_id) for i in items) if e]
+    events.sort(key=lambda e: (e["occurred_at"], e["id"]), reverse=True)
+    events = [{
+        "id": e["id"], "at": e["occurred_at"], "kind": e["kind"], "field": e["field_name"],
+        "old": e["old_value"], "new": e["new_value"], "by": e["employee"], "photo": e["photo"],
+        "body": _clip(e["body"]), "url": e["url"],
+    } for e in events[:OVERVIEW_EVENTS]]
+    return {
+        "issue_id": issue_id, "title": meta["title"], "creator": meta["creator"], "created": meta["created_date"],
+        "tags": meta["tags"], "description": _clip(meta["description"], 1500),
+        "stages": status["stages"], "release_state": status["release_state"], "task_status": status["task_status"],
+        "stage_status": status["stage_status"], "deadline": status["deadline"],
+        "deadline_flag": pc.deadline_flag(status["deadline"]),
+        "hours_spent": status["hours_spent"], "hours_estimated": status["hours_estimated"],
+        "events": events,
+    }
+
+
 def board(base_dir: Optional[str] = None) -> Dict[str, Any]:
     return {"statuses": STATUSES, "cards": list_cards(base_dir)}
 

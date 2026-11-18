@@ -242,13 +242,25 @@ def test_task_overview_collects_status_details_and_newest_events(monkeypatch):
          "employee": {"name": "Bo"}},
         {"id": 2, "created_at": "02.11.2026 09:00", "field_name": "Comment Added",
          "task_comment": {"description": "x" * 900}, "employee": {"name": "Cy"}},
+        {"id": 3, "created_at": "03.11.2026 09:00", "field_name": "Commit Added",
+         "task_commit": {"description": "TL #5 fix", "commit_url": "https://github.com/o/r/commit/abcdef1"}, "employee": {"name": "Bo"}},
     ]
     monkeypatch.setattr(pc, "get_task_by_issue", lambda issue, headers: raw)
     monkeypatch.setattr(pc, "get_task_timeline", lambda task_id, headers: items)
     out = jb.task_overview("5", {})
     assert out["stages"]["Development"] == "in progress"
     assert out["hours_spent"] == 2.5 and out["hours_estimated"] == 5.0 and out["deadline"] == "2026-12-01"
-    assert [e["id"] for e in out["events"]] == [2, 1]  # newest first
-    assert out["events"][0]["body"].endswith("…") and len(out["events"][0]["body"]) <= jb.OVERVIEW_TEXT + 1
-    assert out["events"][1]["old"] == "a" and out["events"][1]["new"] == "b"
-    assert len(out["description"]) <= 1501
+    assert [e["id"] for e in out["events"]] == [3, 2, 1]  # newest first
+    assert out["events"][1]["body"].endswith("…") and len(out["events"][1]["body"]) <= jb.OVERVIEW_TEXT + 1
+    assert out["events"][2]["old"] == "a" and out["events"][2]["new"] == "b"
+    assert len(out["description"]) == 2000  # the description is shown whole
+    assert [c["author"] for c in out["comments"]] == ["Cy"] and len(out["comments"][0]["description"]) == 900  # not clipped
+    assert [c["url"] for c in out["commits"]] == ["https://github.com/o/r/commit/abcdef1"]
+    assert out["project_id"] == 1 and out["task_id"] == 7
+
+
+def test_board_cards_carry_when_they_entered_their_column(tmp_path):
+    base = str(tmp_path)
+    jb.add_card("9", "T", "To Do", base, now=datetime(2026, 11, 1, 9, 0))
+    jb.move_card("9", "In Dev", base, now=datetime(2026, 11, 5, 10, 30))
+    assert jb.board(base)["cards"][0]["since"] == "2026-11-05T10:30:00"

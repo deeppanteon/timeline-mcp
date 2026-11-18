@@ -43,8 +43,9 @@ def list_cards(base_dir: Optional[str] = None) -> List[Dict[str, Any]]:
             for i, t, s, c, sp in rows]
 
 
-OVERVIEW_EVENTS = 60  # newest timeline events sent to the board's task panel
-OVERVIEW_TEXT = 600   # characters kept of a comment, commit message or description
+OVERVIEW_EVENTS = 150  # newest timeline events sent to the board's task panel
+OVERVIEW_TEXT = 600    # characters kept of a comment or commit message in the history list
+OVERVIEW_DESCRIPTION = 20000  # the description and the conversation are shown whole (capped only for safety)
 
 
 def _clip(text: Optional[str], limit: int = OVERVIEW_TEXT) -> Optional[str]:
@@ -57,8 +58,9 @@ def _clip(text: Optional[str], limit: int = OVERVIEW_TEXT) -> Optional[str]:
 def task_overview(issue: Any, headers: Dict[str, str]) -> Dict[str, Any]:
     """
     Everything the board's task panel shows for one task, from two Timeline calls (taskbyissue and the
-    timeline) and nothing stored: header, the six workflow stages, deadline and hours, and the newest
-    timeline events (status and field changes, comments, commits) with long text clipped.
+    timeline) and nothing stored: header, the six workflow stages, deadline and hours, the newest timeline
+    events (status and field changes, comments, commits) with long text clipped, and the whole conversation
+    (description, comments) and commit list as the task page has them.
     """
     issue_id = pc.extract_issue_id(str(issue))
     raw = pc.get_task_by_issue(issue_id, headers)
@@ -72,9 +74,13 @@ def task_overview(issue: Any, headers: Dict[str, str]) -> Dict[str, Any]:
         "old": e["old_value"], "new": e["new_value"], "by": e["employee"], "photo": e["photo"],
         "body": _clip(e["body"]), "url": e["url"],
     } for e in events[:OVERVIEW_EVENTS]]
+    comments = [{**c, "description": _clip(c.get("description"), OVERVIEW_DESCRIPTION) or ""}
+                for c in pc.parse_conversation_comments(items)]
     return {
-        "issue_id": issue_id, "title": meta["title"], "creator": meta["creator"], "created": meta["created_date"],
-        "tags": meta["tags"], "description": _clip(meta["description"], 1500),
+        "issue_id": issue_id, "task_id": pc.extract_task_id_from_data(raw), "title": meta["title"],
+        "creator": meta["creator"], "created": meta["created_date"],
+        "tags": meta["tags"], "description": _clip(meta["description"], OVERVIEW_DESCRIPTION),
+        "comments": comments, "commits": pc.parse_commits(items), "project_id": status["project_id"],
         "stages": status["stages"], "release_state": status["release_state"], "task_status": status["task_status"],
         "stage_status": status["stage_status"], "deadline": status["deadline"],
         "deadline_flag": pc.deadline_flag(status["deadline"]),
@@ -83,8 +89,24 @@ def task_overview(issue: Any, headers: Dict[str, str]) -> Dict[str, Any]:
     }
 
 
+def _in_column_since(base_dir: Optional[str]) -> Dict[str, str]:
+    """issue -> when its card last entered its column (the newest add or move in jira_events)."""
+    conn = pc._open_planner_db(base_dir, create=False)
+    if conn is None:
+        return {}
+    try:
+        rows = conn.execute("SELECT issue_number, MAX(occurred_at) FROM jira_events GROUP BY issue_number").fetchall()
+    finally:
+        conn.close()
+    return {str(i): at for i, at in rows}
+
+
 def board(base_dir: Optional[str] = None) -> Dict[str, Any]:
-    return {"statuses": STATUSES, "cards": list_cards(base_dir)}
+    cards = list_cards(base_dir)
+    since = _in_column_since(base_dir)
+    for card in cards:
+        card["since"] = since.get(str(card["issue_number"]))
+    return {"statuses": STATUSES, "cards": cards}
 
 
 def list_support_tasks(headers: Dict[str, str], projects: Iterable[Dict[str, Any]],

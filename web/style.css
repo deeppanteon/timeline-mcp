@@ -1230,20 +1230,8 @@ a.trow:hover .jira-addchip, .jira-addchip:focus-visible { border: 1px dashed var
 .jira-card .title { margin-top: 4px; color: var(--muted); font-size: 12px; }
 .jira-card .badge.closed { margin-left: 0; }
 .jira-board { margin-top: 8px; }
-.jira-detail { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 16px; margin-top: 12px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
-.jira-detail h3 { margin: 0 0 6px; font-size: 15px; }
-.jira-detail h3 a { text-decoration: none; }
-.jira-detail .note { margin: 8px 0 4px; }
-.jd-badges { display: flex; gap: 6px; }
-.jd-moves { display: flex; flex-wrap: wrap; gap: 6px; }
-.jd-moves button { padding: 3px 12px; border-radius: 99px; font: inherit; font-size: 12px; color: var(--ink); cursor: pointer; border: 1px solid hsl(var(--sc) 55% 55%); background: hsl(var(--sc) 60% 50% / 0.14); }
-.jd-moves button:hover { background: hsl(var(--sc) 60% 50% / 0.3); }
-.jd-moves button.current { background: hsl(var(--sc) 60% 50% / 0.55); font-weight: 600; }
-.jd-side { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .jira-activity { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 10px; }
 .jira-activity-hint { margin-left: auto; }
-@media (max-width: 800px) { .jira-detail { grid-template-columns: 1fr; } }
-.jira-detail .btn.ghost.danger { background: var(--surface-2); color: var(--blocked); border-color: var(--blocked); }
 
 /* ---- jira: card meta and footer ---- */
 .jira-card .meta { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin-top: 6px; font-size: 11px; color: var(--muted); flex-wrap: wrap; }
@@ -1267,43 +1255,30 @@ a.trow:hover .jira-addchip, .jira-addchip:focus-visible { border: 1px dashed var
 @media (max-width: 900px) { .jira-footer { grid-template-columns: 1fr; } }
 
 /* ---- jira: task panel (status, details, history) ---- */
-.jira-detail { display: block; }
-.jd-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
-.jd-head .jd-main { min-width: 0; }
-.jd-head .jd-side { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; }
-.jd-moves { align-items: center; margin: 8px 0 10px; }
-.jd-moves .note { margin: 0 4px 0 0; }
-.jd-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.3fr); gap: 12px; }
-.jd-box { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; min-width: 0; }
-.jd-box h4 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.jd-stages { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
-.jd-stage { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 99px; font-size: 11px; border: 1px solid var(--line); color: var(--muted); }
-.jd-stage i { width: 7px; height: 7px; border-radius: 50%; background: var(--line); }
-.jd-stage.done { color: var(--ink); border-color: var(--done); } .jd-stage.done i { background: var(--done); }
-.jd-stage.doing { color: var(--ink); border-color: var(--progress); } .jd-stage.doing i { background: var(--progress); }
-.jd-stage.blocked { color: var(--ink); border-color: var(--blocked); } .jd-stage.blocked i { background: var(--blocked); }
-.jd-stage.skipped { text-decoration: line-through; }
-.jd-kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 12px; }
-.jd-kv dt { color: var(--muted); }
-.jd-kv dd { margin: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
-.jd-bar { display: inline-block; width: 70px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
-.jd-bar i { display: block; height: 100%; background: var(--done); }
-.jd-bar.over i { background: var(--blocked); }
-.jd-desc { margin-top: 8px; max-height: 190px; overflow-y: auto; font-size: 12px; color: var(--muted); }
-.jd-history h4 .jira-seg.small button { padding: 2px 8px; font-size: 11px; text-transform: none; letter-spacing: 0; }
-.jd-events { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
-.jd-ev { display: flex; gap: 8px; font-size: 12px; }
-.jd-ev .ic { flex: none; width: 16px; text-align: center; color: var(--muted); }
-.jd-ev.status .ic { color: var(--progress); } .jd-ev.commit .ic { color: var(--done); } .jd-ev.comment .ic { color: var(--accent-ink); }
-.jd-ev .who { font-weight: 600; font-size: 11px; display: flex; gap: 8px; align-items: baseline; }
-.jd-ev .who span { color: var(--muted); font-weight: 400; }
-.jd-ev .txt { overflow-wrap: anywhere; color: var(--muted); max-height: 110px; overflow-y: auto; }
-.jd-ev .txt b { color: var(--ink); font-weight: 600; }
 .jira-footer { grid-template-columns: minmax(0, 1fr) minmax(180px, 0.35fr); }
-@media (max-width: 1000px) { .jd-cols { grid-template-columns: 1fr; } .jd-head { flex-direction: column; } }
 
 .jira-footer { grid-template-columns: 1fr; }
 
 .toolbar .jira-flow { flex: 1 1 360px; min-width: 0; margin: 0; }
 .toolbar .jira-flow button { padding: 7px 8px; }
 .jira-flow + .note, .toolbar ~ .note { margin: 6px 0 0; }
+
+/* the Jira board's task panel reuses the task page's head, subtabs, cards and the Timeline feed */
+.jira-detail { margin-top: 12px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.jira-detail .wf { margin: 0; box-shadow: none; background: var(--surface-2); }
+.jira-detail .task-head { margin-bottom: 14px; }
+.jira-detail .subtabs { margin-bottom: 14px; }
+.jira-detail .task-section:first-child { margin-top: 0; }
+.jd-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; align-items: start; }
+.jd-desc { margin-top: 10px; max-height: 260px; overflow-y: auto; }
+.jd-since.warn { color: var(--progress); }
+.jd-since.bad { color: var(--blocked); }
+.pr-box:not([hidden]) + .jd-nobox { display: none; }
+.jira-detail .task-head.jd-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
+.jira-detail .task-head .title-line { flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 0; min-width: 0; }
+.jira-detail .task-head .title-line h2 { min-width: 0; font-size: 20px; }
+.jira-detail .task-head .toolbar { margin: 0; flex: none; }
+.jd-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px 32px; flex-wrap: wrap; }
+.jd-row .subtabs { margin-bottom: 14px; }
+.jd-rail { flex: 0 1 46%; min-width: 320px; margin-bottom: 14px; }
+.jd-rail .rail { margin-bottom: 0; }

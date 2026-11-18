@@ -649,6 +649,7 @@ function supportTag(issue) {
 }
 
 function taskPill(e, tasks) {
+  if (!tasks) return null;  // a feed about one task (the Jira board's panel) doesn't repeat which task it is
   const task = tasks[e.issue_number] || {};
   // The task link, the Timeline button and the support tag are siblings, so hovering one doesn't light up the others.
   return h("span", { class: "tl-taskline" },
@@ -675,7 +676,7 @@ function eventCard(e, tasks) {
 
 function eventMatches(e, tasks, q) {
   if (!q) return true;
-  const hay = `${e.issue_number} ${(tasks[e.issue_number] || {}).title || ""} ${e.employee || ""} ${e.field_name} ${e.old_value || ""} ${e.new_value || ""} ${plainText(e.body)}`.toLowerCase();
+  const hay = `${e.issue_number} ${((tasks || {})[e.issue_number] || {}).title || ""} ${e.employee || ""} ${e.field_name} ${e.old_value || ""} ${e.new_value || ""} ${plainText(e.body)}`.toLowerCase();
   return q.split(/\s+/).every((word) => hay.includes(word));
 }
 
@@ -1771,8 +1772,8 @@ function commitRow(c) {
   const safe = c.url && /^https:\/\//.test(c.url);
   return h("li", { class: "commit-row" },
     safe && code ? h("a", { href: c.url, target: "_blank", rel: "noopener noreferrer", title: "Open commit" }, code) : code,
-    h("span", { class: "commit-msg" }, plainText(c.message) || "(no message)"),
     h("small", { class: "note" }, [c.author, c.created_at].filter(Boolean).join(" · ")),
+    h("span", { class: "commit-msg" }, plainText(c.message) || "(no message)"),
     safe ? h("a", { class: "ext", href: c.url, target: "_blank", rel: "noopener noreferrer", title: "Open commit" }, "↗") : null);
 }
 
@@ -2313,7 +2314,8 @@ async function postJson(path, body) {
 
 async function showJira() {
   loading("Loading the board…");
-  const data = await api("/api/jira/board");
+  const [data] = await Promise.all([api("/api/jira/board"), loadWatched()]);  // watched: the star in the task panel
+  jiraColumns = data.statuses;
   const cards = data.cards;
   let query = "";
   let kind = "all";       // all | task | support
@@ -2424,10 +2426,7 @@ async function showJira() {
       c.support ? h("span", { class: "badge support s-pill", title: "Support task" }, "S") : null,
       c.closed ? h("span", { class: "badge closed" }, "closed") : null,
       c.url ? h("a", { class: "ext", href: c.url, target: "_blank", rel: "noopener noreferrer", draggable: "false", title: "Open in Timeline" }, "↗") : null),
-    h("div", { class: "title" }, c.title),
-    h("div", { class: "meta" },
-      h("span", { class: "due", title: "Deadline" }, c.deadline ? niceDate(c.deadline, false) : "no deadline", flagBadge(c.deadline_flag)),
-      h("span", { class: "hrs", title: "Hours spent / estimated" }, hoursText(c))));
+    h("div", { class: "title" }, c.title));
 
   const visible = (c) => (!query || `${c.issue_number} ${c.title}`.toLowerCase().includes(query))
     && (kind === "all" || (kind === "support") === !!c.support);
@@ -2516,10 +2515,6 @@ async function showJira() {
   // task page doesn't need opening. One backend call per task (/api/jira/task), remembered for a minute.
   const detail = h("div", { class: "jira-detail" });
   const overviews = new Map();  // issue -> {at, data}
-  let historyKind = "all";
-  const STAGE_CLASS = { "done": "done", "in progress": "doing", "blocked": "blocked", "skipped": "skipped", "not started": "todo" };
-  const KIND_ICON = { status: "●", field: "✎", comment: "❝", commit: "⎇", created: "★" };
-  const KIND_FILTER = { all: null, changes: ["status", "field", "created"], comments: ["comment"], commits: ["commit"] };
 
   async function loadOverview(issue, force) {
     const hit = overviews.get(issue);
@@ -2529,77 +2524,189 @@ async function showJira() {
     return data;
   }
 
+  // "3 d" in the column; amber after 5 days, red after 10.
+  const since = (iso) => {
+    const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+    return days < 1 ? "today" : `${days} d`;
+  };
+  const staleClass = (iso) => {
+    const days = (Date.now() - new Date(iso).getTime()) / 86400000;
+    return days >= 10 ? "bad" : days >= 5 ? "warn" : "";
+  };
+
+  // Overview: the same cards, fact lists and stage rail as the task page.
   function statusBlock(o, c) {
-    const spent = Number(o.hours_spent) || 0, est = Number(o.hours_estimated) || 0;
-    const pct = est > 0 ? Math.min(100, Math.round((spent / est) * 100)) : 0;
-    return h("section", { class: "jd-box" }, h("h4", {}, "Status"),
-      h("div", { class: "jd-stages" }, Object.entries(o.stages).map(([label, state]) =>
-        h("span", { class: `jd-stage ${STAGE_CLASS[state] || "todo"}`, title: `${label}: ${state}` }, h("i", {}), label))),
-      h("dl", { class: "jd-kv" },
-        h("dt", {}, "Jira"), h("dd", {}, h("span", { class: "pill status", style: sectionColor(c.status) }, c.status)),
-        h("dt", {}, "Release"), h("dd", {}, o.release_state),
-        h("dt", {}, "Timeline"), h("dd", {}, o.stage_status || o.task_status || "–"),
-        h("dt", {}, "Deadline"), h("dd", {}, o.deadline ? niceDate(o.deadline, false) : "none", flagBadge(o.deadline_flag)),
-        h("dt", {}, "Hours"), h("dd", {}, hoursText({ hours_spent: o.hours_spent, hours_estimated: o.hours_estimated }),
-          est > 0 ? h("span", { class: `jd-bar${spent > est ? " over" : ""}`, title: `${pct}% of the estimate` }, h("i", { style: `width:${pct}%` })) : null)));
+    return h("section", { class: "wf" }, h("h3", {}, "Status"),
+      factList([
+        ["Jira", c.since ? h("span", { class: `jd-since ${staleClass(c.since)}`, title: `In this column since ${c.since.replace("T", " ")}` }, `${c.status}, for ${since(c.since)}`) : c.status],
+        ["Pull requests", cache.guard && cache.guard.rows.has(String(c.issue_number)) ? guardSlot(c.issue_number) : "not checked"],
+        ["Release", o.release_state],
+        ["Timeline", o.stage_status || o.task_status || "–"],
+        ["Deadline", h("span", {}, o.deadline ? niceDate(o.deadline, false) : "none", " ", flagBadge(o.deadline_flag))],
+        ["Hours", hoursText({ hours_spent: o.hours_spent, hours_estimated: o.hours_estimated })],
+      ]));
   }
 
   function detailsBlock(o) {
-    return h("section", { class: "jd-box" }, h("h4", {}, "Details"),
-      h("dl", { class: "jd-kv" },
-        h("dt", {}, "Created"), h("dd", {}, `${o.created ? niceDate(o.created, false) : "–"}${o.creator ? ` by ${o.creator}` : ""}`),
-        o.tags.length ? [h("dt", {}, "Tags"), h("dd", {}, o.tags.map((t) => h("span", { class: "tag" }, t)))] : null),
-      o.description ? h("div", { class: "jd-desc" }, richText(o.description)) : h("p", { class: "note" }, "No description."));
+    return h("section", { class: "wf" }, h("h3", {}, "Details"),
+      factList([
+        ["Created", `${o.created ? niceDate(o.created, false) : "–"}${o.creator ? ` by ${o.creator}` : ""}`],
+        ["Tags", o.tags.length ? o.tags.join(", ") : null],
+        ["Task", `#${o.issue_id} · Timeline id ${o.task_id}`],
+      ]),
+      plainText(o.description) ? h("div", { class: "jd-desc" }, richText(o.description)) : h("p", { class: "note" }, "No description."));
   }
 
-  function eventLine(e) {
-    const when = e.at ? `${niceDate(e.at.slice(0, 10), false)} ${e.at.slice(11, 16)}` : "";
-    let text;
-    if (e.kind === "comment") text = e.body ? richText(e.body) : h("span", {}, "Comment");
-    else if (e.kind === "commit") text = e.url && /^https:\/\//.test(e.url)
-      ? h("a", { href: e.url, target: "_blank", rel: "noopener noreferrer" }, e.body || "Commit") : h("span", {}, e.body || "Commit");
-    else if (e.kind === "created") text = h("span", {}, "Task created");
-    else text = h("span", {}, h("b", {}, e.field), e.old != null || e.new != null ? `: ${e.old ?? "–"} → ${e.new ?? "–"}` : "");
-    return h("li", { class: `jd-ev ${e.kind}` },
-      h("span", { class: "ic", title: e.kind }, KIND_ICON[e.kind] || "•"),
-      h("div", {}, h("div", { class: "who" }, e.by || "Timeline", h("span", {}, when)), h("div", { class: "txt" }, text)));
+  // History: the Timeline page's feed (same cards, same event filter), for this one task.
+  function historyTab(o) {
+    const kinds = Object.entries(EVENT_KINDS).filter(([key]) => key !== "created");
+    const feed = h("ol", { class: "tl-feed" });
+    const draw = () => {
+      const shown = o.events.map((e) => ({
+        id: e.id, kind: e.kind, issue_number: o.issue_id, occurred_at: e.at, employee: e.by, photo: e.photo,
+        field_name: e.field || "", old_value: e.old, new_value: e.new, body: e.body, url: e.url,
+      })).filter((e) => eventsState.kinds.has(e.kind === "created" ? "comment" : e.kind));
+      let day = null;
+      put(feed, shown.length ? shown.flatMap((e) => {
+        const date = e.occurred_at.slice(0, 10);
+        const head = date !== day ? h("li", { class: "tl-day" }, h("h2", {}, niceDate(date), dayNote(date) ? h("em", {}, dayNote(date)) : null)) : null;
+        day = date;
+        return [head, eventCard(e, null)];
+      }) : h("li", { class: "note" }, "No events match these filters."));
+    };
+    const filters = h("div", { class: "tl-kinds", role: "group", "aria-label": "Event types" }, kinds.map(([key, k]) => h("button", {
+      type: "button", class: `tl-kind ${key}`, "aria-pressed": String(eventsState.kinds.has(key)),
+      onclick: (e) => {
+        if (eventsState.kinds.has(key)) eventsState.kinds.delete(key); else eventsState.kinds.add(key);
+        if (key === "comment") { if (eventsState.kinds.has(key)) eventsState.kinds.add("created"); else eventsState.kinds.delete("created"); }
+        saveFilters();
+        e.currentTarget.setAttribute("aria-pressed", String(eventsState.kinds.has(key)));
+        draw();
+      } }, svgIcon(k.icon, 14), k.label)));
+    draw();
+    return h("div", {}, h("div", { class: "toolbar" }, filters,
+      o.events.length >= 150 ? h("span", { class: "note" }, "Showing the newest 150 events.") : null), feed);
   }
 
-  function historyBlock(o, redraw) {
-    const only = KIND_FILTER[historyKind];
-    const shown = o.events.filter((e) => !only || only.includes(e.kind));
-    return h("section", { class: "jd-box jd-history" },
-      h("h4", {}, "History", h("span", { class: "jira-seg small" }, Object.keys(KIND_FILTER).map((k) => h("button", {
-        type: "button", class: k === historyKind ? "on" : "", onclick: () => { historyKind = k; redraw(); },
-      }, k[0].toUpperCase() + k.slice(1))))),
-      shown.length ? h("ul", { class: "jd-events" }, shown.map(eventLine)) : h("p", { class: "note" }, "Nothing here."));
+  // ---- the other tabs of the panel: whole conversation, commits, workflow, pull requests ----
+  const stamp = (text) => { const m = /^(\d+)\.(\d+)\.(\d+)\s+(\d+):(\d+)/.exec(text || ""); return m ? Date.UTC(+m[3], +m[2] - 1, +m[1], +m[4], +m[5]) : 0; };
+  const copyText = async (text) => {
+    try { await navigator.clipboard.writeText(text); toast("Copied to clipboard."); }
+    catch { toast("Couldn't copy: clipboard not available.", true); }
+  };
+  const post = (author, date, content, label, text, photo) => h("li", { class: "post" },
+    avatar(author, photo),
+    h("div", { class: "post-card" },
+      h("div", { class: "post-head" },
+        h("strong", {}, author || "Unknown"),
+        h("button", { type: "button", class: "icon-btn", title: "Copy text", "aria-label": "Copy text", onclick: () => copyText(text || "") }, "⧉"),
+        label ? h("span", { class: "creator" }, label) : null,
+        h("small", {}, date || "")),
+      content));
+
+  function conversationTab(o) {
+    const photos = new Map(o.comments.filter((x) => x.photo).map((x) => [x.author, x.photo]));
+    const desc = plainText(o.description);
+    const items = [
+      ...o.comments.map((x) => ({ at: stamp(x.created_at), order: 0, el: post(x.author, x.created_at,
+        plainText(x.description) ? richText(x.description) : h("p", { class: "note" }, "(no text)"),
+        x.author && x.author === o.creator ? "task creator" : null, plainText(x.description), x.photo) })),
+      ...o.commits.map((x) => ({ at: stamp(x.created_at), order: 1, el: commitEntry(x, photos.get(x.author)) })),
+    ].sort((x, y) => x.at - y.at || x.order - y.order).map((x) => x.el);
+    return h("div", {},
+      h("h3", { class: "task-section" }, "Description"),
+      h("ol", { class: "comments" }, post(o.creator, o.created ? niceDate(o.created, false) : "",
+        desc ? richText(o.description) : h("p", { class: "note" }, "No description."), "task creator", desc, photos.get(o.creator))),
+      h("h3", { class: "task-section" }, `Conversation (${o.comments.length})`),
+      items.length ? h("ol", { class: "comments" }, items) : h("p", { class: "note" }, "No comments yet."));
+  }
+
+  const commitsTab = (o) => h("div", {},
+    o.commits.length ? h("ul", { class: "commit-list" }, o.commits.map(commitRow)) : h("p", { class: "note" }, "No commits linked to this task."));
+
+  function workflowTab(c) {
+    const el = h("section", { class: "wf", "aria-label": "Workflow" }, h("p", { class: "note" }, "Loading the workflow…"));
+    const code = (/\/list\/(\d+)\//.exec(c.url || "") || [])[1] || null;
+    loadWorkflow(el, String(c.issue_number), code);  // the same panel as on the task page: its buttons, runs and history
+    return h("div", {}, el);
+  }
+
+  function pullRequestsTab(c) {
+    return h("div", {}, guardBox(c.issue_number, c.title),
+      h("p", { class: "note jd-nobox" }, "No PR check for this task. The check covers only tasks of the duell-admin and duell-pos projects that the Release page tracks."));
+  }
+
+  const PANEL_TABS = [
+    ["overview", "Overview", () => null],
+    ["history", "History", (o) => o && o.events.length],
+    ["conversation", "Conversation", (o) => o && o.comments.length],
+    ["workflow", "Workflow", () => null],
+    ["prs", "Pull requests", () => null],
+    ["commits", "Commits", (o) => o && o.commits.length],
+  ];
+  let panelTab = "overview";
+
+  function panelTabs(c, o, redraw) {
+    return h("nav", { class: "subtabs", "aria-label": "Task sections" }, PANEL_TABS.map(([key, label, count]) => {
+      const n = count(o);
+      return h("button", { type: "button", class: "subtab", "aria-current": key === panelTab ? "page" : null,
+        onclick: () => { panelTab = key; redraw(); } }, label, n ? h("span", { class: "count" }, String(n)) : null);
+    }));
+  }
+
+  function overviewTab(o, c) {
+    return h("div", { class: "jd-cols" }, statusBlock(o, c), detailsBlock(o));
   }
 
   function drawDetail() {
     const c = cards.find((x) => String(x.issue_number) === selected);
-    if (!c) { put(detail, h("p", { class: "note" }, "Select a card to see its status, details and history here.")); return; }
+    if (!c) { put(detail, h("p", { class: "note" }, "Select a card to see and handle the whole task here.")); return; }
     const issue = String(c.issue_number);
-    const body = h("div", { class: "jd-cols" }, h("p", { class: "note" }, "Loading the task…"));
-    const fill = (o) => put(body, statusBlock(o, c), detailsBlock(o), historyBlock(o, () => fill(o)));
+    const body = h("div", { class: "jd-body" });
+    const tabs = h("div", {});
+    let loaded = null;  // the overview, once it arrived
+    let failure = null; // or why it didn't
+    // Workflow and Pull requests don't need the overview, so those tabs work while it loads or if Timeline can't be read.
+    const show = () => {
+      const o = loaded;
+      put(tabs, panelTabs(c, o, show));
+      let content;
+      if (panelTab === "workflow") content = workflowTab(c);
+      else if (panelTab === "prs") content = pullRequestsTab(c);
+      else if (failure) content = h("p", { class: "error", role: "alert" }, failure.message, " ",
+        h("button", { type: "button", class: "btn ghost small", onclick: () => { overviews.delete(issue); drawDetail(); } }, "Try again"));
+      else if (!o) content = h("p", { class: "note" }, "Loading the task…");
+      else content = { overview: () => overviewTab(o, c), history: () => historyTab(o), conversation: () => conversationTab(o), commits: () => commitsTab(o) }[panelTab]();
+      put(body, content);
+      fillGuardSlots();
+    };
+    const rails = h("div", { class: "jd-rail" });
+    const drawRail = (o) => put(rails, railKey(), rail(o ? { stages: o.stages } : null));
+    drawRail(null);
+    const setRail = (o) => drawRail(o);
     put(detail,
-      h("div", { class: "jd-head" },
-        h("div", { class: "jd-main" },
-          h("h3", {}, h("a", { href: `#/task/${c.issue_number}` }, `#${c.issue_number}`), " ", c.title),
-          h("div", { class: "jd-badges" },
-            c.support ? h("span", { class: "badge support" }, "support") : h("span", { class: "badge task" }, "task"),
-            c.closed ? h("span", { class: "badge closed" }, "closed") : null)),
-        h("div", { class: "jd-side" },
+      h("section", { class: "task-head jd-top" },
+        h("div", { class: "title-line" },
+          c.closed ? null : watchButton(issue),
+          h("a", { class: "issue", href: `#/task/${c.issue_number}` }, `#${c.issue_number}`),
+          h("h2", {}, c.title || "(no title)"), openInTimeline(c.issue_number, c.url),
+          c.support ? h("span", { class: "badge support" }, "support") : h("span", { class: "chip muted" }, "task"),
+          c.closed ? h("span", { class: "chip overdue", title: "Timeline reports this task as closed" }, "closed") : null,
+          // The column is changed by dragging the card on the board, so here it is only shown.
+          h("span", { class: "stage jira-cell" }, h("span", { class: "pill status", style: sectionColor(c.status), title: "Drag the card to another column to change it" }, c.status))),
+        h("div", { class: "toolbar" },
           h("a", { class: "btn ghost small", href: `#/task/${c.issue_number}` }, "Open task page"),
-          c.url ? h("a", { class: "btn ghost small", href: c.url, target: "_blank", rel: "noopener noreferrer" }, "Open in Timeline ↗") : null,
           h("button", { type: "button", class: "btn ghost small", title: "Reload from Timeline", onclick: () => {
             overviews.delete(issue); drawDetail();
           } }, "↻ Refresh"),
-          h("button", { type: "button", class: "btn ghost small danger", onclick: () => {
+          h("button", { type: "button", class: "btn small danger", title: "Take the card off the board", onclick: () => {
             if (confirm(`Take #${c.issue_number} off the board?`)) removeCard(c);
           } }, "Remove"))),
+      h("div", { class: "jd-row" }, tabs, rails),
       body);
-    loadOverview(issue).then((o) => { if (selected === issue && body.isConnected) fill(o); },
-      (err) => { if (selected === issue && body.isConnected) put(body, h("p", { class: "error" }, err.message)); });
+    show();
+    loadOverview(issue).then((o) => { if (selected === issue && body.isConnected) { loaded = o; setRail(o); show(); } },
+      (err) => { if (selected === issue && body.isConnected) { failure = err; show(); } });
   }
 
   // The footer: your latest moves (with Undo) and the box that takes a card off the board.
@@ -2615,11 +2722,15 @@ async function showJira() {
           : null))
       : h("p", { class: "note" }, "Nothing moved on this page yet."));
   }
-  function draw() { put(board, data.statuses.map(column)); drawFlow(); drawDetail(); drawFooter(); }
+  function draw() {
+    jiraStatuses = new Map(cards.map((x) => [String(x.issue_number), x.status]));  // the shared Jira cell reads this
+    put(board, data.statuses.map(column)); drawFlow(); drawDetail(); drawFooter();
+  }
 
   const footer = h("div", { class: "jira-footer" },
     h("section", {}, h("h4", {}, "Recent moves"), recentBox));
 
+  trackGuard();  // the PR badge in the task panel comes from the same cached report as the planner and task pages
   const kinds = h("div", { class: "jira-seg", role: "group", "aria-label": "Show" });
   const drawKinds = () => put(kinds, [["all", "All"], ["task", "Tasks"], ["support", "Support"]].map(([k, label]) => h("button", {
     type: "button", class: k === kind ? "on" : "", "aria-pressed": k === kind ? "true" : "false",

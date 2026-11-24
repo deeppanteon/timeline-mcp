@@ -60,6 +60,18 @@ function openInTimeline(issue, url) {
   }, "↗");
 }
 
+// The one "support" tag. `short` is the one-letter form for tight cards.
+function supportBadge(short = false) {
+  return h("span", { class: "badge support", title: "Support" }, short ? "S" : "support");
+}
+
+// The one "Checked 5 min ago" label; the exact time is in the tooltip.
+function setStamp(el, iso, parse = (v) => v) {
+  const d = new Date(parse(iso));
+  el.textContent = iso ? `Checked ${ago(parse(iso))}` : "";
+  el.title = Number.isNaN(d.getTime()) ? "" : d.toLocaleString("en-GB");
+}
+
 function niceDate(iso, withWeekday = true) {
   if (!iso) return "";
   const d = new Date(`${iso}T00:00:00`);
@@ -136,7 +148,8 @@ function richText(source) {
 }
 
 // The same subset for text that is already plain (task docs, Claude's replies).
-function markdown(text) {
+// `github`: also treat a block indented four spaces (after a blank line) as code and nest indented list items.
+function markdown(text, { github = false } = {}) {
   const lines = String(text || "").split("\n");
   const root = h("div", { class: "body rich" });
   for (let i = 0; i < lines.length; i++) {
@@ -144,7 +157,14 @@ function markdown(text) {
     const heading = line.match(/^\s*(#{1,6})\s+(.*)$/);
     const item = line.match(/^\s*([-*]|\d+[.)])\s+(.*)$/);
     const fence = line.match(/^\s*(```|~~~)/);
-    if (fence) {
+    if (github && /^( {4}|\t)\S/.test(line) && (i === 0 || !lines[i - 1].trim())) {
+      const code = [];
+      let j = i;
+      while (j < lines.length && (!lines[j].trim() || /^( {4}|\t)/.test(lines[j]))) code.push(lines[j++].replace(/^( {4}|\t)/, ""));
+      while (code.length && !code[code.length - 1].trim()) code.pop();
+      root.append(h("pre", { class: "md-code" }, code.join("\n")));
+      i = j - 1;
+    } else if (fence) {
       const code = [];
       for (i++; i < lines.length && !lines[i].trim().startsWith(fence[1]); i++) code.push(lines[i]);
       root.append(h("pre", { class: "md-code" }, code.join("\n")));
@@ -161,7 +181,11 @@ function markdown(text) {
       i--;
       root.append(h("blockquote", {}, quote.map((q) => h("div", {}, q ? inline(q) : " "))));
     } else if (heading) root.append(h("strong", { class: `md-h md-h${heading[1].length}` }, inline(heading[2])));
-    else if (item) root.append(h("div", { class: "md-li" }, `${/\d/.test(item[1]) ? item[1] : "•"} `, inline(item[2])));
+    else if (item) {
+      const depth = github ? Math.min(Math.floor(line.match(/^\s*/)[0].length / 2), 4) : 0;
+      root.append(h("div", { class: "md-li", style: depth ? `margin-left: ${depth * 1.2}em` : null },
+        `${/\d/.test(item[1]) ? item[1] : depth % 2 ? "◦" : "•"} `, inline(item[2])));
+    }
     else root.append(h("div", {}, line ? inline(line) : " "));
   }
   return root;
@@ -250,7 +274,7 @@ function taskCard(task, boards) {
       h("span", { class: "issue" }, `#${task.issue_number}`),
       flagBadge(task.deadline_flag),
       guardSlot(task.issue_number),
-      task.support ? h("span", { class: "badge support" }, "support") : null),
+      task.support ? supportBadge() : null),
     h("p", { class: "title" }, task.title, " ", openInTimeline(task.issue_number, task.url)),
     rail(cache.statuses.get(String(task.issue_number))),
     h("div", { class: "foot" },
@@ -345,7 +369,7 @@ function changeCard(task, kind, at, first, fresh) {
       chip(task.stage_status || "No stage"),
       deadlineChip(task),
       task.release_state ? chip(RELEASE_LABEL[task.release_state] || task.release_state) : null,
-      task.support ? chip("Support") : null,
+      task.support ? supportBadge() : null,
       task.code ? chip(changeBoards[String(task.code)] || `Board ${task.code}`, "muted") : null,
     ];
   }
@@ -394,7 +418,19 @@ function dayNote(date) {
 // Read once per page load: a background refresh must not mark them seen.
 let changesSeenAt = "";
 try { changesSeenAt = localStorage.getItem("changesSeenAt") || ""; } catch { /* storage blocked */ }
-let changesFilter = "all";
+// Filter choices survive a reload (per browser). Unreadable or blocked storage just means the defaults.
+const PREF_PREFIX = "timeline-desk.pref.";
+function loadPref(name, fallback) {
+  try {
+    const raw = localStorage.getItem(PREF_PREFIX + name);
+    return raw === null ? fallback : JSON.parse(raw);
+  } catch { return fallback; }
+}
+function savePref(name, value) {
+  try { localStorage.setItem(PREF_PREFIX + name, JSON.stringify(value)); } catch { /* storage blocked: not remembered */ }
+}
+let changesFilter = loadPref("changes.filter", "all");
+if (!CHANGE_KINDS.some((k) => k.key === changesFilter)) changesFilter = "all";
 
 function niceTime(iso) {
   if (!iso) return "";
@@ -434,7 +470,7 @@ async function showChanges(quiet = false, check = false) {
     tile(history.last_checked ? clock(history.last_checked) : "—", "last checked", history.last_checked ? ago(history.last_checked) : ""),
     checkError ? h("div", { class: "tl-tile bad" }, h("b", {}, "!"), h("span", {}, checkError)) : null);
 
-  const pick = (key) => { changesFilter = key; showChanges(true); };
+  const pick = (key) => { changesFilter = key; savePref("changes.filter", key); showChanges(true); };
   const filters = h("div", { class: "tl-kinds", role: "group", "aria-label": "Filter changes" },
     h("button", { type: "button", class: "tl-kind", "aria-pressed": String(changesFilter === "all"), onclick: () => pick("all") }, "All"),
     CHANGE_KINDS.map((k) => h("button", { type: "button", class: `tl-kind ${k.key}`, "aria-pressed": String(changesFilter === k.key),
@@ -540,12 +576,13 @@ function loadFilters() {
     const saved = JSON.parse(localStorage.getItem(FILTERS_KEY) || "null");
     if (saved && Array.isArray(saved.kinds)) state.kinds = new Set(saved.kinds.filter((k) => k in EVENT_KINDS).concat(saved.kinds.includes("comment") ? ["created"] : []));
     if (saved && Array.isArray(saved.issues)) state.issues = new Set(saved.issues.map(String));
+    if (saved && typeof saved.q === "string") state.q = saved.q;
   } catch (error) { /* storage blocked or unreadable: use the defaults */ }
   return state;
 }
 function saveFilters() {
   try {
-    localStorage.setItem(FILTERS_KEY, JSON.stringify({ kinds: [...eventsState.kinds], issues: [...eventsState.issues] }));
+    localStorage.setItem(FILTERS_KEY, JSON.stringify({ kinds: [...eventsState.kinds], issues: [...eventsState.issues], q: eventsState.q }));
   } catch (error) { /* storage blocked: the choice just won't be remembered */ }
 }
 const eventsState = loadFilters();
@@ -645,7 +682,7 @@ async function loadSupportIds() {
 }
 
 function supportTag(issue) {
-  return cache.supportIds && cache.supportIds.has(String(issue)) ? h("span", { class: "badge support" }, "support") : null;
+  return cache.supportIds && cache.supportIds.has(String(issue)) ? supportBadge() : null;
 }
 
 function taskPill(e, tasks) {
@@ -827,7 +864,7 @@ async function showTimeline(force) {
     } }, "Load older events") : (loaded.length ? h("p", { class: "note" }, "That's the whole history.") : null));
   };
   const add = (page) => { loaded.push(...page.events); Object.assign(tasks, page.tasks); cursor = page.next; render(); };
-  search.addEventListener("input", () => { eventsState.q = search.value; render(); });
+  search.addEventListener("input", () => { eventsState.q = search.value; saveFilters(); render(); });
   add(first);
 
   // Live: merge events that arrived since the page was drawn, without losing scroll, filters or older pages.
@@ -938,7 +975,6 @@ async function checkRelease(results, stamp, button, fetchFresh) {
       const poll = setInterval(async () => {  // shows which step the build is on
         try {
           const { step } = await api("/api/release/progress");
-          if (step) stamp.textContent = `${step}… (${Math.round((Date.now() - started) / 1000)} s)`;
         } catch { /* the build request reports real errors */ }
       }, 700);
       try {
@@ -950,7 +986,7 @@ async function checkRelease(results, stamp, button, fetchFresh) {
     await getWorkflows(true);
     renderPrs(report, results, () => checkRelease(results, stamp, button, true));
     await getGuard();
-    stamp.textContent = `Checked at ${clock(report.generated_at)}`;
+    setStamp(stamp, report.generated_at);
   } catch (error) {
     stamp.textContent = "";
     put(results, h("p", { class: "error", role: "alert" }, error.message));
@@ -961,8 +997,8 @@ async function checkRelease(results, stamp, button, fetchFresh) {
 
 async function showRelease(force) {
   const results = h("div", { id: "release-results" });
-  const stamp = h("span", { class: "note" });
-  const check = h("button", { type: "button", class: "btn" }, "Check again");
+  const stamp = h("span", { class: "stamp" });
+  const check = h("button", { type: "button", class: "btn ghost" }, "Check again");
   check.addEventListener("click", () => checkRelease(results, stamp, check, true));
   put(view, h("div", { class: "toolbar" }, check, stamp), results);
   await checkRelease(results, stamp, check, Boolean(force));
@@ -990,6 +1026,27 @@ async function getGuard() {
 const guardSlot = (issue) => h("span", { class: "pr-slot", "data-issue": String(issue) });
 const guardBox = (issue, title) => h("section", { class: "wf pr-box", "data-issue": String(issue), "data-title": title || "", hidden: true });
 
+// The row with the live list of open PRs applied, so a PR made after the last release report counts at once.
+const LEVEL_RANK = { ok: 0, warn: 1, missing: 2 };
+function withLivePrs(row) {
+  if (!openPrs.loaded || !openPrs.map.size) return row;
+  let changed = false;
+  const sections = row.sections.map((section) => {
+    const checks = section.checks.map((check) => {
+      const live = !check.pr && openPrs.map.get(openPrKey(check.repo, row.issue_id, check.base));
+      if (!live) return check;
+      changed = true;
+      return { ...check, level: "warn", can_create: false, pr: { number: live.number, url: live.url, state: "open" } };
+    });
+    const level = checks.length && section.level in LEVEL_RANK ? checks.reduce((w, c) => (LEVEL_RANK[c.level] > LEVEL_RANK[w] ? c.level : w), "ok") : section.level;
+    return { ...section, checks, level };
+  });
+  if (!changed) return row;
+  const level = sections.filter((x) => x.level in LEVEL_RANK).reduce((w, x) => (LEVEL_RANK[x.level] > LEVEL_RANK[w] ? x.level : w), "ok");
+  const problems = sections.flatMap((x) => x.checks.filter((c) => c.level !== "ok").map((c) => `${x.repo}: ${c.pr ? `PR #${c.pr.number} into ${c.base} is open, not merged yet` : c.message}`));
+  return { ...row, sections, level, summary: problems.length ? problems.join("; ") : "PRs in place" };
+}
+
 function guardBadge(row) {
   const [text, tone] = GUARD_BADGE[row.level];
   const checked = cache.guard && cache.guard.at ? ` · checked ${ago(cache.guard.at)}` : "";
@@ -999,12 +1056,12 @@ function guardBadge(row) {
 function fillGuardSlots() {
   for (const slot of document.querySelectorAll(".pr-slot")) {
     const row = cache.guard && cache.guard.rows.get(slot.dataset.issue);
-    put(slot, row ? guardBadge(row) : null);
+    put(slot, row ? guardBadge(withLivePrs(row)) : null);
   }
   for (const box of document.querySelectorAll(".pr-box")) {
     const row = cache.guard && cache.guard.rows.get(box.dataset.issue);
     box.hidden = !row;
-    put(box, row ? [h("h3", {}, "Pull requests"), guardRows([row], box.dataset.title, () => refreshGuard())] : null);
+    put(box, row ? [h("h3", {}, "Pull requests"), guardRows([withLivePrs(row)], box.dataset.title, () => refreshGuard())] : null);
   }
 }
 
@@ -1012,6 +1069,7 @@ function fillGuardSlots() {
 async function trackGuard() {
   await getGuard();
   fillGuardSlots();
+  refreshOpenPrs();
   const age = cache.guard && cache.guard.at ? Date.now() - new Date(cache.guard.at) : Infinity;
   if (age < GUARD_STALE_MS || guardState.busy || Date.now() - guardState.failedAt < GUARD_RETRY_MS) return;
   await refreshGuard(true);
@@ -1041,23 +1099,28 @@ const LEVEL_ICON = { ok: ["✓", "Fine"], warn: ["!", "Check"], missing: ["✕",
 const prIcon = (level) => h("span", { class: `pr-ico ${level}`, role: "img", "aria-label": LEVEL_ICON[level][1], title: LEVEL_ICON[level][1] }, LEVEL_ICON[level][0]);
 
 function checkLine(row, check, title, onChange) {
+  // The release report can be up to half an hour old; the live list of open PRs wins over its "no PR yet".
+  const live = !check.pr && openPrs.map.get(openPrKey(check.repo, row.issue_id, check.base));
+  if (live) check = { ...check, level: "warn", can_create: false, pr: { number: live.number, url: live.url, state: "open" } };
   const pr = check.pr;
   const link = pr && pr.url && /^https:\/\//.test(pr.url) ? h("a", { href: pr.url, target: "_blank", rel: "noopener noreferrer" }, `PR ${pr.number} ↗`) : null;
   let text;
   if (pr) text = pr.state === "merged" ? "merged" : "open, not merged yet";
   else if (check.level === "ok") text = check.message.charAt(0).toLowerCase() + check.message.slice(1);
   else text = check.no_branch ? "no PR, and no branch yet" : "no PR yet";
-  const create = check.can_create
+  const create = check.can_create && !openPrs.loaded
+    ? h("span", { class: "pr-checking", "aria-busy": "true", title: "Checking GitHub for an open PR…" }, spinner(), " Checking PRs…")
+    : check.can_create
     ? h("button", { type: "button", class: "btn small", title: `Create a PR in ${check.repo} into ${check.base}`, onclick: async (e) => {
       e.target.disabled = true;
       const made = await createPr(check.repo, row.issue_id, title || row.title, check.base);
       e.target.disabled = false;
-      if (made) await onChange();
+      if (made) { await refreshOpenPrs(); await onChange(); }
     } }, "Create PR")
     : null;
   return h("li", { class: `pr-line ${check.level}`, title: `${check.repo}: ${check.message}` },
     prIcon(check.level),
-    h("span", { class: "pr-line-text" }, h("strong", {}, ENV_LABEL[check.base] || check.base), " ", h("code", { class: "pr-base", title: `${check.repo}: PRs are checked against the ${check.base} branch` }, `→ ${check.base}`), " ", text, link ? " · " : null, link),
+    h("span", { class: "pr-line-text" }, h("strong", {}, ENV_LABEL[check.base] || check.base), " ", h("span", { class: "pr-base", title: `${check.repo}: PRs are checked against the ${check.base} branch` }, h("span", { "aria-hidden": "true" }, "→ "), h("code", { class: "br-chip into" }, check.base)), " ", text, link ? " · " : null, link),
     create);
 }
 
@@ -1075,7 +1138,7 @@ function guardCell(row, section, title, onChange) {
   return h("section", { class: `pr-cell ${section.level}`, "aria-label": section.repo },
     h("div", { class: "pr-cell-head" },
       h("strong", {}, section.repo),
-      section.branches.length ? h("span", { class: "pr-branch", title: section.branches.join("\n") }, `branch ${section.branches[0]}${extra > 0 ? ` +${extra}` : ""}`) : null),
+      section.branches.length ? h("span", { class: "pr-branch", title: section.branches.join("\n") }, h("span", { class: "pr-branch-label" }, "branch"), h("code", { class: "br-chip from" }, section.branches[0]), extra > 0 ? h("span", { class: "note" }, `+${extra}`) : null) : null),
     body);
 }
 
@@ -1095,9 +1158,10 @@ function guardRows(rows, title, onChange) {
 // "Release readiness" at the top of the Release page: tickets in QA or going live, and what their PRs look like.
 function guardPanel(guard, onChange) {
   if (!guard) return null;
-  const { ok, warn, missing } = guard.counts;
-  const need = guard.rows.filter((r) => r.level !== "ok");
-  const fine = guard.rows.filter((r) => r.level === "ok");
+  const rows = guard.rows.map(withLivePrs);
+  const ok = rows.filter((r) => r.level === "ok").length, warn = rows.filter((r) => r.level === "warn").length, missing = rows.filter((r) => r.level === "missing").length;
+  const need = rows.filter((r) => r.level !== "ok");
+  const fine = rows.filter((r) => r.level === "ok");
   const count = missing + warn;
   const verdict = !guard.checked ? "None of your tickets are in QA or waiting to go live."
     : count ? `${count} ticket${count === 1 ? " needs" : "s need"} action, ${ok} ${ok === 1 ? "is" : "are"} fine.`
@@ -1154,13 +1218,63 @@ function prDialog(draft) {
     let result = null;
     const dialog = h("dialog", { class: "tl-dialog tl-modal pr-dialog", "aria-label": `Create a PR into ${draft.repo} ${draft.base}` });
     const entities = draft.repo === "duell-admin"; // only duell-admin has .env.dist and entity files to look at
-    const title = h("input", { type: "text", value: draft.title, maxlength: "250", "aria-label": "PR title" });
-    const body = h("textarea", { rows: "10", spellcheck: "false", "aria-label": "PR description" }, draft.body);
-    const branch = h("select", { "aria-label": "Branch" }, draft.branches.map((b) => h("option", { value: b, selected: b === draft.head }, b)));
+    const title = h("input", { id: "pr-title", type: "text", value: draft.title, maxlength: "250", "aria-label": "PR title" });
+    const body = h("textarea", { id: "pr-desc", rows: "16", spellcheck: "false", "aria-label": "PR description" }, draft.body);
+    const branch = h("select", { id: "pr-branch", "aria-label": "Branch" }, draft.branches.map((b) => h("option", { value: b, selected: b === draft.head }, b)));
     const problem = h("p", { class: "tl-modal-problem", role: "alert", hidden: true });
     const cancel = () => dialog.close();
     // Asks Claude (claude -p, no tools) to word the description from the ticket title and the branch's commit messages.
-    const ai = h("button", { type: "button", class: "btn ghost small", title: entities ? "Sends the ticket title, the branch's commit messages and the diffs of changed entity files to Claude" : "Sends the ticket title and the branch's commit messages to Claude" }, "Write with AI");
+    const preview = h("div", { class: "pr-preview", hidden: true });
+    const tabWrite = h("button", { type: "button", class: "pr-tab", role: "tab", "aria-selected": "true" }, "Write");
+    const tabPreview = h("button", { type: "button", class: "pr-tab", role: "tab", "aria-selected": "false" }, "Preview");
+    const showTab = (previewing) => {
+      tabWrite.setAttribute("aria-selected", String(!previewing));
+      tabPreview.setAttribute("aria-selected", String(previewing));
+      body.hidden = previewing;
+      preview.hidden = !previewing;
+      ai.hidden = previewing;
+      tools.hidden = previewing;
+      if (previewing) put(preview, body.value.trim() ? markdown(body.value, { github: true }) : h("p", { class: "note" }, "Nothing to preview."));
+      else body.focus();
+    };
+    // Formatting buttons act on the textarea's selection, like GitHub's: wrap it, or prefix each selected line.
+    const edit = (fn) => {
+      const { selectionStart: a, selectionEnd: b, value } = body;
+      const [text, from, to] = fn(value.slice(a, b), value.slice(0, a), value.slice(b));
+      body.focus();
+      body.setRangeText(text, a, b, "end");
+      body.setSelectionRange(a + from, a + to);
+    };
+    const wrap = (left, right = left, fallback = "text") => () => edit((sel) => [left + (sel || fallback) + right, left.length, left.length + (sel || fallback).length]);
+    // List, quote and heading buttons work on whole lines: the ones the selection touches (or the cursor's line).
+    const lines = (prefix, marker) => () => {
+      const { selectionStart: a, selectionEnd: b, value } = body;
+      const from = value.lastIndexOf("\n", a - 1) + 1;
+      const end = value.indexOf("\n", b);
+      const to = end === -1 ? value.length : end;
+      const rows = value.slice(from, to).split("\n");
+      const label = (i) => (typeof prefix === "function" ? prefix(i) : prefix);
+      const done = rows.every((r) => marker.test(r)); // pressed again: take the marker off
+      const next = rows.map((r, i) => (done ? r.replace(marker, "") : label(i) + r.replace(marker, ""))).join("\n");
+      body.focus();
+      body.setRangeText(next, from, to, "end");
+      body.setSelectionRange(rows.length === 1 ? from + next.length : from, from + next.length);
+    };
+    const link = () => edit((sel) => {
+      const label = sel || "text";
+      return [`[${label}](url)`, label.length + 3, label.length + 6];
+    });
+    const TOOLS = [
+      ["H", "Heading", lines("### ", /^#{1,6}\s+/)], ["B", "Bold", wrap("**")], ["I", "Italic", wrap("_")],
+      ["❝", "Quote", lines("> ", /^>\s?/)], ["</>", "Code", () => edit((sel) => (sel.includes("\n")
+        ? [`\`\`\`\n${sel}\n\`\`\``, 4, 4 + sel.length] : [`\`${sel || "code"}\``, 1, 1 + (sel || "code").length]))],
+      ["🔗", "Link", link], ["•", "Bulleted list", lines("- ", /^[-*]\s+(\[[ x]\]\s+)?/)], ["1.", "Numbered list", lines((i) => `${i + 1}. `, /^\d+[.)]\s+/)], ["☑", "Task list", lines("- [ ] ", /^[-*]\s+(\[[ x]\]\s+)?/)],
+    ];
+    const tools = h("div", { class: "pr-tools", role: "toolbar", "aria-label": "Formatting" },
+      TOOLS.map(([glyph, name, run]) => h("button", { type: "button", class: "pr-tool", title: name, "aria-label": name, onclick: run }, glyph)));
+    tabWrite.addEventListener("click", () => showTab(false));
+    tabPreview.addEventListener("click", () => showTab(true));
+    const ai = h("button", { type: "button", class: "btn ghost small", title: entities ? "Sends the ticket title, the branch's commit messages and the diffs of changed entity files to Claude" : "Sends the ticket title and the branch's commit messages to Claude" }, "✨ Write with AI");
     // What the branch changes against the base: .env.dist variables (added to the description with empty
     // values) and Doctrine entities (the AI writes their SQL).
     const findings = h("div", { class: "pr-findings", hidden: true });
@@ -1168,7 +1282,9 @@ function prDialog(draft) {
       const lines = [];
       if (analysis) {
         const vars = [...analysis.env.added, ...analysis.env.changed];
-        if (vars.length) lines.push(`.env.dist: ${vars.length} new or changed variable${vars.length === 1 ? "" : "s"} (${vars.join(", ")}), added below with empty values to fill in.`);
+        if (vars.length) lines.push(h("div", { class: "pr-vars" },
+          h("p", {}, `.env.dist: ${vars.length} new or changed variable${vars.length === 1 ? "" : "s"}, added under "Before release" with empty values to fill in.`),
+          h("div", { class: "pr-var-list" }, vars.map((v) => h("code", { class: "pr-var" }, v)))));
         if (analysis.env.removed.length) lines.push(`.env.dist: removed ${analysis.env.removed.join(", ")}.`);
         if (analysis.entities.length) {
           const names = analysis.entities.map((e) => `${e.path.split("/").pop().replace(/\.php$/, "")} (${e.db})`).join(", ");
@@ -1177,7 +1293,7 @@ function prDialog(draft) {
         }
       }
       for (const w of warnings || []) lines.push(w);
-      put(findings, lines.map((line) => h("p", {}, line)));
+      put(findings, h("h3", {}, "What this branch changes"), lines.map((line) => (typeof line === "string" ? h("p", {}, line) : line)));
       findings.hidden = !lines.length;
     };
     showFindings(draft.analysis, draft.warnings, 0);
@@ -1199,7 +1315,7 @@ function prDialog(draft) {
         problem.hidden = false;
       } finally {
         ai.disabled = false;
-        ai.textContent = "Write with AI";
+        ai.textContent = "✨ Write with AI";
       }
     });
     const form = h("form", { method: "dialog", onsubmit: (ev) => {
@@ -1211,26 +1327,49 @@ function prDialog(draft) {
       result = { head: branch.value, title: title.value.trim(), body: body.value };
       dialog.close();
     } },
-    h("header", {}, h("h2", {}, `Create a PR in ${draft.repo}`), h("button", { type: "button", class: "tl-dialog-x", "aria-label": "Close", onclick: cancel }, "×")),
-    h("p", { class: "tl-modal-text" }, `Opens a pull request on GitHub in ${draft.repo} for #${draft.issue_id}. Nothing is pushed or merged. ${PR_SOURCE_TEXT[draft.source] || `Description taken from ${draft.source}.`}`),
-    h("label", {}, "Title", title),
-    h("label", {}, `Branch → ${draft.base}`, branch),
-    h("label", {}, "Description", body),
-    h("div", { class: "pr-ai" }, ai, h("span", { class: "note" }, entities
-      ? "Uses your Claude: it gets the ticket title, the commit messages and the diffs of changed entity files (for the SQL), nothing else."
-      : "Uses your Claude: it gets the ticket title and the commit messages, nothing else.")),
-    findings,
+    h("header", {},
+      h("div", { class: "pr-heading" },
+        h("h2", {}, "Create a pull request"),
+        h("span", { class: "pr-chip repo" }, draft.repo),
+        h("span", { class: "pr-chip issue" }, `#${draft.issue_id}`)),
+      h("button", { type: "button", class: "tl-dialog-x", "aria-label": "Close", onclick: cancel }, "×")),
+    h("p", { class: "tl-modal-text pr-intro" }, `Opens a pull request on GitHub in ${draft.repo} for #${draft.issue_id}. Nothing is pushed or merged. ${PR_SOURCE_TEXT[draft.source] || `Description taken from ${draft.source}.`}`),
+    h("div", { class: "pr-route" },
+      h("div", { class: "pr-route-from" }, h("label", { for: "pr-branch" }, "From branch"), branch),
+      h("span", { class: "pr-route-arrow", "aria-hidden": "true" }, "→"),
+      h("div", { class: "pr-route-to" }, h("label", {}, "Into branch"), h("code", { class: "br-chip into", title: `${draft.repo}: the PR goes into ${draft.base}` }, draft.base))),
+    h("div", { class: "pr-grid" },
+    h("div", { class: "pr-side" },
+    h("div", { class: "pr-desc-head" }, h("label", { for: "pr-title" }, "Title")),
+    title,
+    findings),
+    h("div", { class: "pr-main" },
+      h("div", { class: "pr-desc-head" },
+        h("label", { for: "pr-desc" }, "Description"),
+        ai),
+      h("div", { class: "pr-editor" },
+        h("div", { class: "pr-bar" },
+          h("div", { class: "pr-tabs", role: "tablist", "aria-label": "Description editor" }, tabWrite, tabPreview),
+          tools),
+        body,
+        preview),
+      h("p", { class: "note pr-ai-note" }, entities
+        ? "Write with AI uses your Claude: it gets the ticket title, the commit messages and the diffs of changed entity files (for the SQL), nothing else."
+        : "Write with AI uses your Claude: it gets the ticket title and the commit messages, nothing else."))),
     problem,
     h("footer", {},
+      h("span", { class: "pr-hint" }, "Ctrl + Enter creates the PR"),
       h("button", { type: "button", class: "btn ghost", onclick: cancel }, "Cancel"),
       h("button", { type: "submit", class: "btn" }, `Create PR into ${draft.base}`)));
     body.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) form.requestSubmit(); });
     let pressed = null;
     dialog.addEventListener("pointerdown", (ev) => { pressed = ev.target; });
     dialog.addEventListener("click", (ev) => { if (ev.target === dialog && pressed === dialog) cancel(); });
-    dialog.addEventListener("close", () => { dialog.remove(); resolve(result); });
+    const scrollWas = document.body.style.overflow;
+    dialog.addEventListener("close", () => { document.body.style.overflow = scrollWas; dialog.remove(); resolve(result); });
     dialog.append(form);
     document.body.append(dialog);
+    document.body.style.overflow = "hidden";  // the page behind must not scroll with the dialog
     dialog.showModal();
   });
 }
@@ -1314,70 +1453,11 @@ function workflowLink(issue, code, boards) {
   }, flow ? flow.status.short : "+ Workflow");
 }
 
-function sizeText(bytes) {
-  return bytes >= 1048576 ? `${(bytes / 1048576).toFixed(0)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
-}
-
-async function removeWorktree(item, withBranch, button) {
-  const ok = await confirmDialog({
-    title: `Remove the worktree for #${item.issue_id || item.branch}?`,
-    text: withBranch ? `Its branch ${item.branch} is deleted too.` : `The branch ${item.branch} stays.`,
-    ok: withBranch ? "Remove worktree and branch" : "Remove worktree", danger: true });
-  if (!ok) return;
-  button.disabled = true;
-  try {
-    const r = await api("/api/work/remove", {
-      method: "POST",
-      headers: { "X-Timeline-Desk": "1", "Content-Type": "application/json" },
-      body: JSON.stringify({ path: item.path, delete_branch: withBranch }),
-    });
-    toast(r.branch_note || `Removed ${item.branch}${r.branch_deleted ? " and its branch" : ""}.`, Boolean(r.branch_note));
-  } catch (error) {
-    toast(error.message, true);
-  }
-  showWork();
-}
-
-async function showWork() {
-  loading("Loading task worktrees…");
-  const [{ worktrees }, boards] = await Promise.all([api("/api/work/worktrees"), getBoards(), getWorkflows(true)]);
-  if (!Object.keys(boards).length) {
-    put(view, h("p", { class: "note" }, "No repos set up. Copy timeline-desk.example.json to timeline-desk.json and add your board → repo paths."));
-    return;
-  }
-  const total = worktrees.reduce((sum, w) => sum + w.size, 0);
-  const rows = worktrees.map((w) => {
-    const facts = [];
-    if (!w.exists) facts.push("folder missing");
-    if (w.dirty) facts.push(`${w.dirty} uncommitted`);
-    if (w.unpushed) facts.push(`${w.unpushed} commit${w.unpushed === 1 ? "" : "s"} only here`);
-    if (w.merged) facts.push(`no new commits vs base`);
-    if (!facts.length) facts.push("clean");
-    const remove = h("button", { type: "button", class: "btn ghost small" }, "Remove");
-    remove.addEventListener("click", () => removeWorktree(w, false, remove));
-    const both = h("button", { type: "button", class: "btn ghost small" }, "Remove + branch");
-    both.addEventListener("click", () => removeWorktree(w, true, both));
-    if (w.dirty) { remove.disabled = true; both.disabled = true; remove.title = both.title = "Commit or discard the changes first"; }
-    return h("tr", {},
-      h("td", {}, w.issue_id ? h("a", { href: `#/task/${w.issue_id}`, class: "issue" }, `#${w.issue_id}`) : "—"),
-      h("td", {}, h("code", {}, w.branch || "(detached)"), h("div", { class: "note" }, w.repo)),
-      h("td", {}, sizeText(w.size)),
-      h("td", { class: w.dirty || w.unpushed ? "warn-text" : "" }, facts.join(" · ")),
-      h("td", { class: "actions" },
-        w.issue_id ? workflowLink(w.issue_id, w.code, boards) : null, remove, both));
-  });
-  put(view,
-    h("p", { class: "summary" }, h("strong", {}, String(worktrees.length)), ` task worktree${worktrees.length === 1 ? "" : "s"} · ${sizeText(total)}`),
-    worktrees.length
-      ? h("table", { class: "work" },
-        h("thead", {}, h("tr", {}, ["Task", "Branch", "Size", "State", ""].map((t) => h("th", {}, t)))),
-        h("tbody", {}, rows))
-      : h("p", { class: "note" }, "No task worktrees. Starting a workflow on a task page makes one."),
-    h("p", { class: "note" }, "Remove never forces: git keeps a worktree with uncommitted changes and a branch with commits that aren't merged anywhere."));
-}
-
 // ---- my tasks (project list) ----------------------------------------------
 const listState = { project: null, tab: null, q: "", tag: "", stage: "", all: false, closed: new Set() };
+const LIST_PREFS = ["project", "tab", "q", "tag", "stage", "all"];
+Object.assign(listState, Object.fromEntries(Object.entries(loadPref("list", {})).filter(([k]) => LIST_PREFS.includes(k))));
+const saveList = () => savePref("list", Object.fromEntries(LIST_PREFS.map((k) => [k, listState[k]])));
 let listToken = 0;
 const TAG_COLOR = /^#[0-9a-f]{3,8}$/i;
 
@@ -1504,7 +1584,7 @@ function taskRow(t, boards, support = false) {
     watchButton(t.issue_number),
     h("span", { class: "issue" }, `#${t.issue_number}`),
     h("div", { class: "ttitle" },
-      h("span", { class: "tname" }, t.title, openInTimeline(t.issue_number, t.url), support ? h("span", { class: "badge support" }, "support") : null),
+      h("span", { class: "tname" }, t.title, openInTimeline(t.issue_number, t.url), support ? supportBadge() : null),
       t.tags.length ? h("span", { class: "tags" }, t.tags.map(tagChip)) : null),
     rail(t),
     jiraStatusCell(t),
@@ -1542,25 +1622,25 @@ async function showTaskList(refresh) {
     const all = data.groups.flatMap((g) => g.tasks);
     const tagNames = [...new Set(all.flatMap((t) => t.tags.map((x) => x.name)))].sort();
     const stageNames = [...new Set(all.map(jiraStatus).filter(Boolean))].sort();
-    if (listState.tag && !tagNames.includes(listState.tag)) listState.tag = "";
-    if (listState.stage && !stageNames.includes(listState.stage)) listState.stage = "";
+    if (listState.tag && !tagNames.includes(listState.tag)) { listState.tag = ""; saveList(); }
+    if (listState.stage && !stageNames.includes(listState.stage)) { listState.stage = ""; saveList(); }
 
     const select = (label, options, key) => {
       const el = h("select", { "aria-label": label }, h("option", { value: "" }, label), options.map((o) => h("option", { value: o }, o)));
       el.value = listState[key];
-      el.addEventListener("change", () => { listState[key] = el.value; renderList(); });
+      el.addEventListener("change", () => { listState[key] = el.value; saveList(); renderList(); });
       return el;
     };
     const search = h("input", { type: "text", placeholder: "Filter tasks or enter an ID…", "aria-label": "Filter tasks or enter an ID", value: listState.q, size: "22" });
-    search.addEventListener("input", () => { listState.q = search.value; renderList(); });
+    search.addEventListener("input", () => { listState.q = search.value; saveList(); renderList(); });
     const projectPicker = projects.length > 1
-      ? h("select", { "aria-label": "Project", onchange: (e) => { listState.project = Number(e.target.value); listState.tab = null; showTaskList(); } },
+      ? h("select", { "aria-label": "Project", onchange: (e) => { listState.project = Number(e.target.value); listState.tab = null; saveList(); showTaskList(); } },
         projects.map((p) => h("option", { value: p.id, selected: p.id === project.id }, p.name)))
       : null;
     const summary = h("span", { class: "note" });
     const allBox = h("input", { type: "checkbox" });
     allBox.checked = listState.all;
-    allBox.addEventListener("change", () => { listState.all = allBox.checked; renderList(); });
+    allBox.addEventListener("change", () => { listState.all = allBox.checked; saveList(); renderList(); });
     const listEl = h("div", { class: "tlist" });
 
     const renderList = () => {
@@ -1660,6 +1740,7 @@ async function showTaskList(refresh) {
     }
     if (token !== listToken) return;
     listState.tab = data.tab;
+    saveList();
     draw(data, base.tabs, support);
   };
   await load(listState.tab, refresh);
@@ -1691,6 +1772,10 @@ async function showTask(issue, force) {
   await getPlanner().catch(() => null); // for the Timeline link of planner tasks
   const jiraBoard = await api("/api/jira/board").catch(() => null);
   const jiraCard = jiraBoard && jiraBoard.cards.find((c) => String(c.issue_number) === String(task.issue_id));
+  if (jiraBoard) {  // the shared Jira cell reads these
+    jiraStatuses = new Map(jiraBoard.cards.map((c) => [String(c.issue_number), c.status]));
+    jiraColumns = jiraBoard.statuses;
+  }
   const planned = cache.planner && Object.values(cache.planner.periods).flatMap((p) => p.tasks)
     .find((t) => String(t.issue_number) === String(task.issue_id));
   const link = planned && planned.url;
@@ -1700,7 +1785,9 @@ async function showTask(issue, force) {
       h("span", { class: "issue" }, `#${task.issue_id}`),
       h("h2", {}, task.title || "(no title)"), openInTimeline(task.issue_id, link || task.url)),
     h("div", { class: "facts" },
-      jiraBoard ? h("span", { class: "chip", title: "Status on your Jira board" }, jiraCard ? jiraCard.status : "Not on Jira board") : null,
+      jiraBoard ? h("span", { class: "jira-head", title: "Status on your Jira board. The pencil moves the card or adds the task to the board." },
+        jiraCard ? null : h("span", { class: "chip" }, "Not on Jira board"),
+        jiraStatusCell({ issue_number: task.issue_id })) : null,
       task.creator ? h("span", {}, `Created by ${task.creator}`) : null,
       task.created_date ? h("span", {}, niceDate(task.created_date, false)) : null,
       task.tags.length ? h("span", {}, `Tags: ${task.tags.join(", ")}`) : null,
@@ -1995,7 +2082,7 @@ function resetForm(el, issue, code, v) {
       h("li", {}, `The workflow's status, ${p.runs} run(s) with their results and conversations, every decision, ${p.findings} QA finding(s) and all approval requests.`),
       h("li", {}, files.length ? `${files.length} file(s) in ${p.folders.map((f) => f.path).join(" and ")}:` : "No files in the task's timeline folder."),
       files.length ? h("details", { class: "wf-more" }, h("summary", {}, "Show the files"), h("pre", { class: "md-code" }, files.join("\n"))) : null),
-    h("p", { class: "note" }, `Kept: the worktree ${p.worktree || ""} and its branch ${p.branch || ""} (remove them on the Work tab), and the copied Timeline history.`,
+    h("p", { class: "note" }, `Kept: the worktree ${p.worktree || ""} and its branch ${p.branch || ""} (remove them with git worktree remove), and the copied Timeline history.`,
       open ? ` Run ${open.id} is open: a run on this page is stopped first; a terminal run must be closed before you reset.` : ""),
     h("div", { class: "wf-actions" }, h("label", { class: "note" }, `Type ${issue} to confirm `, typed), go, cancel));
 }
@@ -2240,7 +2327,7 @@ async function showWorkflows(arg) {
     const t = planned.get(String(w.issue));
     return h("span", { class: "wf-meta" },
       flagBadge(t && t.deadline_flag),
-      t && t.support ? h("span", { class: "badge support" }, "support") : null,
+      t && t.support ? supportBadge() : null,
       t ? chip(t.period, "muted") : null,
       chip((t && t.stage_status) || "Not on planner", "muted"),
       t ? deadlineChip(t) : null,
@@ -2317,15 +2404,18 @@ async function showJira() {
   const [data] = await Promise.all([api("/api/jira/board"), loadWatched()]);  // watched: the star in the task panel
   jiraColumns = data.statuses;
   const cards = data.cards;
-  let query = "";
-  let kind = "all";       // all | task | support
-  let focus = "";         // a column picked on the status bar
+  const boardPrefs = loadPref("board", {});
+  let query = typeof boardPrefs.query === "string" ? boardPrefs.query : "";
+  let kind = ["all", "task", "support"].includes(boardPrefs.kind) ? boardPrefs.kind : "all";  // all | task | support
+  let focus = typeof boardPrefs.focus === "string" && data.statuses.includes(boardPrefs.focus) ? boardPrefs.focus : "";  // a column picked on the status bar
+  const saveBoard = () => savePref("board", { query, kind, focus });
   let selected = "";      // the card shown in the detail panel
   const recent = [];      // moves made on this page, newest first: {at, card, from, to}
   let dragging = null;
   const error = h("p", { class: "error", role: "alert", hidden: true });
   const fail = (e) => { error.textContent = e.message; error.hidden = false; };
-  const board = h("div", { class: "jira-board", style: `--cols:${data.statuses.length}` });
+  const board = h("div", { class: "jira-board", style: `--cols:${data.statuses.length}; grid-template-columns:${
+    data.statuses.map((st) => ((data.pr_statuses || []).includes(st) ? "minmax(176px, 1.35fr)" : "minmax(130px, 1fr)")).join(" ")}` });
 
   // The picker: all your assigned tasks that are not on the board yet.
   const picker = h("dialog", { class: "jira-picker" });
@@ -2359,7 +2449,7 @@ async function showJira() {
             refreshAdd();
           },
         }, h("span", { class: "issue" }, `#${t.issue_number}`), " ", t.title, " ", openInTimeline(t.issue_number, t.url),
-        isSupport ? h("span", { class: "badge support" }, "support") : null));
+        isSupport ? supportBadge() : null));
       };
       put(list, groups.filter((g) => g.tasks.length).flatMap((g) => [
         h("li", { class: `jira-pick-section${g.support ? " support" : ""}` }, g.name, h("span", { class: "pill" }, String(g.tasks.length))),
@@ -2423,41 +2513,56 @@ async function showJira() {
   },
     h("div", { class: "head" },
       h("a", { class: "issue", href: `#/task/${c.issue_number}`, draggable: "false" }, `#${c.issue_number}`),
-      c.support ? h("span", { class: "badge support s-pill", title: "Support task" }, "S") : null,
+      c.support ? supportBadge(true) : null,
       c.closed ? h("span", { class: "badge closed" }, "closed") : null,
       c.url ? h("a", { class: "ext", href: c.url, target: "_blank", rel: "noopener noreferrer", draggable: "false", title: "Open in Timeline" }, "↗") : null),
     h("div", { class: "title" }, c.title));
 
   const visible = (c) => (!query || `${c.issue_number} ${c.title}`.toLowerCase().includes(query))
     && (kind === "all" || (kind === "support") === !!c.support);
+  const prStatuses = data.pr_statuses || [];
+  // Dropping on a column (or on one of the two halves of a PR column: pr = false / true).
+  const dropOn = async (status, pr) => {
+    const moved = dragging;
+    if (!moved) return;
+    if (moved.task) {  // from the task list: put it on the board
+      error.hidden = true;
+      try {
+        const { cards: added } = await postJson("/api/jira/cards", { issues: [moved.task.issue_number], status });
+        cards.push(...added);
+        if (pr) await moveCard(added[0], status, false, true);
+        else draw();
+      } catch (err) {
+        fail(err);
+      }
+      return;
+    }
+    moveCard(moved, status, true, pr);
+  };
+  const dropTarget = (status, pr) => ({
+    ondragover: (e) => { if (dragging) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = "move"; e.currentTarget.classList.add("drop"); } },
+    ondragleave: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) e.currentTarget.classList.remove("drop"); },
+    ondrop: (e) => { e.preventDefault(); e.stopPropagation(); dropOn(status, pr); },
+  });
   const column = (status) => {
     const items = cards.filter((c) => c.status === status && visible(c));
+    const split = prStatuses.includes(status);
+    // A PR column keeps its cards in the usual list and adds a "PR created" pane below it.
+    const open = items.filter((c) => !c.pr_created), created = items.filter((c) => c.pr_created);
     return h("section", {
-      class: `jira-col${focus && focus !== status ? " dim" : ""}`,
+      class: `jira-col${split ? " split" : ""}${focus && focus !== status ? " dim" : ""}`,
       style: sectionColor(status),
-      ondragover: (e) => { if (dragging) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; e.currentTarget.classList.add("drop"); } },
-      ondragleave: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) e.currentTarget.classList.remove("drop"); },
-      ondrop: async (e) => {
-        e.preventDefault();
-        const moved = dragging;
-        if (moved && moved.task) {  // from the task list: put it on the board
-          error.hidden = true;
-          try {
-            const { cards: added } = await postJson("/api/jira/cards", { issues: [moved.task.issue_number], status });
-            cards.push(...added);
-            draw();
-          } catch (err) {
-            fail(err);
-          }
-          return;
-        }
-        if (moved) moveCard(moved, status);
-      },
+      ...dropTarget(status, false),  // a PR column also takes a drop on its free space: no PR
     },
       h("h2", {}, h("span", { class: "jira-col-name" }, status), h("span", { class: "pill" }, String(items.length)),
         h("button", { type: "button", class: "jira-add", title: `Add a task to ${status}`, "aria-label": `Add a task to ${status}`,
           onclick: () => openPicker(status) }, "+")),
-      items.map(card));
+      split
+        ? [h("div", { class: "jira-main", ...dropTarget(status, false) }, open.map(card)),
+          h("div", { class: "jira-sub pr", ...dropTarget(status, true) },
+            h("h3", {}, "PR created", h("span", { class: "pill" }, String(created.length))),
+            created.length ? created.map(card) : h("div", { class: "jira-empty" }, "Drop here once the PR is created"))]
+        : items.map(card));
   };
 
   async function removeCard(c) {
@@ -2473,22 +2578,26 @@ async function showJira() {
   }
 
   // Moves a card at once and undoes it if the server refuses (drag and drop and the detail panel both come here).
-  async function moveCard(c, status, log = true) {
+  async function moveCard(c, status, log = true, pr = false) {
     closeJiraMenu();
-    if (!c || c.status === status) return;
-    const before = c.status;
+    if (!c) return;
+    const sameColumn = c.status === status;
+    if (sameColumn && (!prStatuses.includes(status) || !!c.pr_created === pr)) return;
+    const before = c.status, beforePr = !!c.pr_created;
     c.status = status;
+    c.pr_created = prStatuses.includes(status) && pr;
     error.hidden = true;
-    if (log) {
+    if (log && !sameColumn) {
       recent.unshift({ at: new Date(), card: c, from: before, to: status });
       recent.length = Math.min(recent.length, 5);
     }
     draw();
     try {
-      await postJson(`/api/jira/cards/${c.issue_number}/move`, { status });
+      await postJson(`/api/jira/cards/${c.issue_number}/move`, { status, pr_created: c.pr_created });
     } catch (err) {
       c.status = before;
-      if (log) recent.shift();
+      c.pr_created = beforePr;
+      if (log && !sameColumn) recent.shift();
       fail(err);
       draw();
     }
@@ -2505,7 +2614,7 @@ async function showJira() {
     put(flow, segs.map(({ status, n }) => h("button", {
       type: "button", class: status === focus ? "on" : "", style: `${sectionColor(status)}; flex: ${Math.max(n, 1)} 1 0`,
       title: `${status}: ${n}`,
-      onclick: () => { focus = focus === status ? "" : status; draw(); },
+      onclick: () => { focus = focus === status ? "" : status; saveBoard(); draw(); },
     }, `${status} ${n}`)));
     const total = cards.filter(visible).length;
     flowNote.textContent = `${total} task${total === 1 ? "" : "s"} on the board${focus ? ` · focused on ${focus} (click it again to clear)` : ""}`;
@@ -2690,7 +2799,7 @@ async function showJira() {
           c.closed ? null : watchButton(issue),
           h("a", { class: "issue", href: `#/task/${c.issue_number}` }, `#${c.issue_number}`),
           h("h2", {}, c.title || "(no title)"), openInTimeline(c.issue_number, c.url),
-          c.support ? h("span", { class: "badge support" }, "support") : h("span", { class: "chip muted" }, "task"),
+          c.support ? supportBadge() : h("span", { class: "chip muted" }, "task"),
           c.closed ? h("span", { class: "chip overdue", title: "Timeline reports this task as closed" }, "closed") : null,
           // The column is changed by dragging the card on the board, so here it is only shown.
           h("span", { class: "stage jira-cell" }, h("span", { class: "pill status", style: sectionColor(c.status), title: "Drag the card to another column to change it" }, c.status))),
@@ -2712,7 +2821,7 @@ async function showJira() {
   // The footer: your latest moves (with Undo) and the box that takes a card off the board.
   const recentBox = h("div", { class: "jf-list" });
   function drawFooter() {
-    const time = (d) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const time = (d) => d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
     put(recentBox, recent.length
       ? recent.map((r, i) => h("div", { class: "jf-move" },
         h("span", { class: "t" }, time(r.at)),
@@ -2734,15 +2843,15 @@ async function showJira() {
   const kinds = h("div", { class: "jira-seg", role: "group", "aria-label": "Show" });
   const drawKinds = () => put(kinds, [["all", "All"], ["task", "Tasks"], ["support", "Support"]].map(([k, label]) => h("button", {
     type: "button", class: k === kind ? "on" : "", "aria-pressed": k === kind ? "true" : "false",
-    onclick: () => { kind = k; drawKinds(); draw(); },
+    onclick: () => { kind = k; saveBoard(); drawKinds(); draw(); },
   }, label)));
   drawKinds();
 
   put(view,
     h("div", { class: "toolbar" },
       h("input", {
-        type: "search", class: "jira-search", placeholder: "Search cards…", "aria-label": "Search cards",
-        oninput: (e) => { query = e.target.value.trim().toLowerCase(); draw(); },
+        type: "search", class: "jira-search", placeholder: "Search cards…", "aria-label": "Search cards", value: query,
+        oninput: (e) => { query = e.target.value.trim().toLowerCase(); saveBoard(); draw(); },
       }),
       kinds, flow),
     error,
@@ -2774,17 +2883,17 @@ const COVERAGE_STATE = {
   on_qa: ["On QA", "", "Every commit is on QA, waiting for production."],
   shipped: ["Shipped", "ok", "Every commit is on production."],
 };
-// Tickets are grouped by Timeline's stage, which says what to expect of the code (the server sets `section` and `attention`).
+// Tickets are grouped by Timeline's stage, which says what to expect of the code (the server sets `section`).
 const COVERAGE_SECTIONS = {
-  dev: ["In development", "Nothing is expected on QA or production yet, so a ticket here is not judged by missing commits. One is listed only when its code is already ahead of Timeline: on QA or production while Timeline still says before QA.", "ahead of Timeline"],
-  qa: ["In QA", "Every commit should be on QA.", "need attention"],
-  qa_blocked: ["QA blocked", "QA found a problem. Every commit should still be on QA.", "need attention"],
-  approved: ["QA approved", "Every commit should reach production.", "need attention"],
-  live: ["Live", "Timeline says Live: every commit should be on production. Closed tickets are left out completely.", "need attention"],
-  unknown: ["Timeline status not read", "Nothing could be read from Timeline for these (it was unreachable, or it does not know the ticket). Only the code state is judged.", "need attention"],
+  dev: ["In development", "Nothing is expected on QA or production yet, so a ticket here is not judged by missing commits. One is listed only when its code is already ahead of Timeline: on QA or production while Timeline still says before QA."],
+  qa: ["In QA", "Every commit should be on QA."],
+  qa_blocked: ["QA blocked", "QA found a problem. Every commit should still be on QA."],
+  approved: ["QA approved", "Every commit should reach production."],
+  live: ["Live", "Timeline says Live: every commit should be on production. Closed tickets are left out completely."],
+  unknown: ["Timeline status not read", "Nothing could be read from Timeline for these (it was unreachable, or it does not know the ticket). Only the code state is judged."],
 };
 const COVERAGE_SECTION_ORDER = ["dev", "qa", "qa_blocked", "approved", "live", "unknown"];
-const coverageView = { filter: "attention", open: {} };
+const coverageView = { filter: "", selected: "", query: "", collapsed: { live: true } };
 const utc = (iso) => (iso ? `${iso}Z` : iso);
 const shortDate = (iso) => (iso ? String(iso).slice(0, 10) : "never");
 
@@ -2813,17 +2922,49 @@ function coverageCommit(c, url, released) {
     h("td", {}, coverageSha(c, url)),
     h("td", { class: "note" }, shortDate(c.date)),
     h("td", { class: "note", title: c.email || "" }, String(c.email || c.author || "").split("@")[0]),
-    h("td", { class: "cov-subject" }, c.subject),
+    h("td", { class: "cov-subject", title: c.subject }, String(c.subject || "").replace(/^TL\s*#\d+\s*[:\-–]?\s*/i, "")),  // the ticket number is already in the header
     h("td", {}, coveragePill("QA", c.qa, c.dropped_qa)),
     h("td", {}, coveragePill("Prod", c.prod, c.dropped_prod)));
 }
 
-function coverageChip(label, n, total) {
+// A chip with commits missing is a button: it creates the PR that brings them there, whatever Timeline or Jira says.
+function coverageChip(label, n, total, create) {
   const tone = n === total ? "ok" : n === 0 ? "bad" : "warn";
-  return h("span", { class: `cov-chip ${tone}` }, h("span", {}, label), h("strong", {}, `${n}/${total}`));
+  const parts = [h("span", {}, label), h("strong", {}, `${n}/${total}`)];
+  if (!create || n === total) return h("span", { class: `cov-chip ${tone}` }, parts);
+  const missing = total - n;
+  const pr = openPrs.map.get(openPrKey(create.repo, create.issue, create.base));
+  if (!openPrs.loaded) {  // not known yet whether a PR is already open: no Create PR flash
+    return h("span", { class: `cov-act checking ${tone}`, "aria-busy": "true", title: "Checking GitHub for an open PR…" },
+      h("span", { class: "cov-act-info" }, h("span", {}, label), h("strong", {}, `${n}/${total}`)),
+      h("span", { class: "cov-act-go" }, spinner(), h("span", { class: "cov-act-text" }, "Checking PRs…")));
+  }
+  if (pr) {
+    const text = h("span", { class: "cov-act-text" }, `PR #${pr.number} open, not merged`);
+    const go = h("span", { class: "cov-act-go" }, h("span", { "aria-hidden": "true" }, "✓"), text);
+    const info = h("span", { class: "cov-act-info" }, h("span", {}, label), h("strong", {}, `${n}/${total}`));
+    const safe = pr.url && /^https:\/\//.test(pr.url);
+    return h(safe ? "a" : "span", { class: `cov-act has-pr ${tone}`, href: safe ? pr.url : null, target: safe ? "_blank" : null, rel: safe ? "noopener noreferrer" : null,
+      title: `PR #${pr.number} into ${create.base} is open. It stays here until it is merged.` }, info, go);
+  }
+  const button = h("button", { type: "button", class: `cov-act ${tone}`,
+    title: `${missing} commit${missing === 1 ? " is" : "s are"} missing from ${create.env}. Create a PR in ${create.repo} into ${create.base}.` },
+    h("span", { class: "cov-act-info" }, h("span", {}, label), h("strong", {}, `${n}/${total}`)),
+    h("span", { class: "cov-act-go" }, h("span", { "aria-hidden": "true" }, "+"), h("span", { class: "cov-act-text" }, `Create PR → ${create.base}`)));
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    const go = button.querySelector(".cov-act-go");
+    const idle = [...go.childNodes];
+    const busy = (on) => { if (on) go.replaceChildren(spinner(), h("span", { class: "cov-act-text" }, "Creating PR…")); else go.replaceChildren(...idle); };
+    busy(true);
+    const made = await createPr(create.repo, create.issue, create.title, create.base);
+    if (made) await refreshOpenPrs();  // the re-render replaces this button
+    if (!made || button.isConnected) { busy(false); button.disabled = false; }
+  });
+  return button;
 }
 
-function coverageRepo(row, checks) {
+function coverageRepo(row, checks, ticket) {
   // Commits not on production (or dropped) are listed; the ones on both sit behind a Show/Hide row in the same table.
   const open = row.commits.filter((c) => !c.prod || c.dropped_qa || c.dropped_prod);
   const done = row.commits.filter((c) => !open.includes(c));
@@ -2842,11 +2983,14 @@ function coverageRepo(row, checks) {
   return h("section", { class: "cov-repo", "data-repo": row.repo },
     h("div", { class: "cov-repo-head" },
       h("h4", {}, row.repo),
-      row.branches.map((b) => h("code", { class: "cov-branch" }, b)),
-      h("span", { class: "cov-chips" }, coverageChip("On QA", row.on_qa, row.total), coverageChip("On production", row.on_prod, row.total))),
-    h("p", { class: "note cov-meta" },
-      `Newest commit on QA ${shortDate(row.last_qa_commit_at)} · on production ${shortDate(row.last_prod_commit_at)}`,
-      checked ? ` · checked ${ago(utc(checked))}` : ""),
+      row.branches.length ? h("span", { class: "cov-branches-label" }, row.branches.length === 1 ? "branch" : "branches") : null,
+      row.branches.map((b) => h("code", { class: "br-chip from cov-branch", title: `Branch ${b}` }, b))),
+    h("div", { class: "cov-sub" },
+      h("p", { class: "note cov-meta", title: "Date of the newest commit that reached QA and production" },
+        `QA ${shortDate(row.last_qa_commit_at)} · Prod ${shortDate(row.last_prod_commit_at)}`,
+        checked ? ` · checked ${ago(utc(checked))}` : ""),
+      h("span", { class: "cov-chips" }, coverageChip("On QA", row.on_qa, row.total, { env: "QA", base: "qa-release", repo: row.repo, issue: ticket.issue, title: ticket.title }),
+        coverageChip("On production", row.on_prod, row.total, { env: "production", base: COVERAGE_PROD_BASE[row.repo] || "prod-release", repo: row.repo, issue: ticket.issue, title: ticket.title }))),
     h("div", { class: "cov-table-wrap" }, h("table", { class: "cov-commits" },
       coverageColumns(),
       h("tbody", {},
@@ -2860,14 +3004,30 @@ const COVERAGE_STAGE = { "before qa": "Before QA", "in qa": "In QA", "qa blocked
 const COVERAGE_FLAG_TONE = { missing: "overdue", warn: "soon" };
 const hasFlags = (t) => Boolean(t.flags && t.flags.length);
 
+const COVERAGE_PROD_BASE = { "duell-admin": "master" };
+
+// Open PRs into the release branches, so a PR made from here keeps its number on the chip until it is merged.
+const openPrs = { map: new Map(), report: null, results: null, loaded: false };
+const spinner = () => h("span", { class: "cov-spin", role: "img", "aria-label": "Loading" });
+const openPrKey = (repo, issue, base) => `${repo}|${issue}|${base}`;
+async function refreshOpenPrs() {
+  try {
+    const { prs } = await api("/api/pr/open");
+    openPrs.map = new Map(prs.filter((p) => p.issue).map((p) => [openPrKey(p.repo, p.issue, p.base), p]));
+  } catch { /* without gh the chips just offer Create PR */ }
+  openPrs.loaded = true;
+  if (openPrs.report && openPrs.results && openPrs.results.isConnected) renderCoverage(openPrs.report, openPrs.results);
+  fillGuardSlots();
+}
+
 function coverageTicket(t, checks) {
   const [label, baseTone, hint] = COVERAGE_STATE[t.state] || [t.state, "", ""];
   const tone = t.section === "dev" && t.state !== "dropped" ? "" : baseTone;  // not being on QA yet is normal in development
   return h("section", { class: `card cov-card ${t.state}${hasFlags(t) ? " flagged" : ""}`, "data-issue": t.issue },
     h("div", { class: "cov-head" },
       h("a", { class: "issue", href: `#/task/${t.issue}` }, `#${t.issue}`),
-      openInTimeline(t.issue, t.url),
       h("span", { class: "cov-title note", title: t.title }, t.title),
+      openInTimeline(t.issue, t.url),
       h("span", { class: `badge ${tone}`, title: hint }, label),
       h("span", { class: "cov-statuses" },
         t.timeline ? h("span", { class: "cov-status", title: "Where the task is in Timeline" },
@@ -2876,82 +3036,207 @@ function coverageTicket(t, checks) {
           h("span", { class: "note" }, "Jira"), jiraStatusCell({ issue_number: t.issue })) : null),
       t.unread && t.unread.length ? h("span", { class: "note", title: "These repos could not be read, so the ticket may be incomplete." }, `not read: ${t.unread.join(", ")}`) : null),
     hasFlags(t) ? h("ul", { class: "cov-flags" }, t.flags.map((f) =>
-      h("li", {}, h("span", { class: `badge ${COVERAGE_FLAG_TONE[f.level] || ""}` }, f.level === "missing" ? "Mismatch" : "Check"), " ", f.text))) : null,
-    Object.values(t.repos).map((row) => coverageRepo(row, checks)));
+      h("li", { class: `cov-flag ${f.level}` }, h("span", { class: `badge ${COVERAGE_FLAG_TONE[f.level] || ""}` }, f.level === "missing" ? "Mismatch" : "Check"), " ", f.text))) : null,
+    Object.values(t.repos).map((row) => coverageRepo(row, checks, t)));
 }
 
-function coverageSection(key, tickets, checks, total) {
-  const [label, hint, attentionText] = COVERAGE_SECTIONS[key];
-  const flagged = tickets.filter((t) => t.attention).length;
-  const open = key in coverageView.open ? coverageView.open[key] : flagged > 0;
-  const shown = tickets.length === total ? String(total) : `${tickets.length} of ${total}`;  // the filter hides the rest
-  const details = h("details", { class: `cov-section${flagged ? " needs" : ""}`, open },
-    h("summary", { class: "cov-section-head" },
-      h("div", { class: "cov-section-top" },
-        h("span", { class: "cov-section-title", role: "heading", "aria-level": "2" }, label),
-        h("span", { class: "count", title: tickets.length === total ? "" : `${total} tickets in this section; the filter shows ${tickets.length}` }, shown),
-        flagged ? h("span", { class: "badge overdue" }, `${flagged} ${flagged === 1 && attentionText === "need attention" ? "needs attention" : attentionText}`) : h("span", { class: "note" }, "all as expected")),
-      h("div", { class: "cov-hint" }, hint)),
-    tickets.map((t) => coverageTicket(t, checks)));
-  details.addEventListener("toggle", () => { coverageView.open[key] = details.open; });
-  return details;
+// Needs attention = Timeline and the code disagree (the server's flags) or a commit was dropped.
+const coverageAttention = (t) => hasFlags(t) || t.state === "dropped";
+
+function coverageBadge(t) {
+  const [label, baseTone, hint] = COVERAGE_STATE[t.state] || [t.state, "", ""];
+  if (hasFlags(t)) {
+    const mismatch = t.flags.some((f) => f.level === "missing");
+    return h("span", { class: `badge ${mismatch ? "overdue" : "soon"}`, title: t.flags.map((f) => f.text).join(" ") }, mismatch ? "Mismatch" : "Check");
+  }
+  const tone = t.section === "dev" && t.state !== "dropped" ? "" : baseTone;
+  return h("span", { class: `badge ${tone}`, title: hint }, label);
 }
 
-function coverageTile(value, label, tone, hint) {
-  return h("div", { class: `cov-tile ${tone || ""}`, title: hint || "" },
-    h("div", { class: "cov-tile-value" }, value), h("div", { class: "cov-tile-label" }, label));
+function coverageRow(t, selected, pick) {
+  const row = h("div", { class: `cov-li${selected ? " sel" : ""}`, role: "option", tabindex: selected ? "0" : "-1", "aria-selected": String(selected), "data-issue": t.issue },
+    h("span", { class: `cov-dot s-${t.section || "unknown"}` }),
+    h("span", { class: "cov-li-num" }, `#${t.issue}`),
+    h("span", { class: "cov-li-main" },
+      h("span", { class: "cov-li-title", title: t.title }, t.title),
+      rail(t.timeline && t.timeline.stages ? { stages: t.timeline.stages } : null)),  // Timeline's stage rail, as on the other pages
+    coverageBadge(t));
+  row.addEventListener("click", () => pick(String(t.issue), false));
+  row.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); pick(String(t.issue), false); }
+  });
+  return row;
 }
 
 function renderCoverage(report, results) {
+  openPrs.report = report;
+  openPrs.results = results;
   const tickets = report.tickets;
-  const attention = tickets.filter((t) => t.attention);
-  const list = coverageView.filter === "all" ? tickets : attention;
   const left = report.hidden ? report.hidden.closed + report.hidden.retired : 0;
-  const filter = (key, text, n) => {
-    const on = coverageView.filter === key;
-    const b = h("button", { type: "button", class: `cov-seg${on ? " on" : ""}`, "aria-pressed": String(on) }, text, h("span", { class: "n" }, n));
-    b.addEventListener("click", () => { coverageView.filter = key; renderCoverage(report, results); });
-    return b;
-  };
-  const sections = COVERAGE_SECTION_ORDER.map((key) => [key, list.filter((t) => (t.section || "unknown") === key)])
-    .filter(([, group]) => group.length);
+  const sectionOf = (t) => t.section || "unknown";
   const info = [
     report.authors && report.authors.length ? ["Your commits as", report.authors.join(", ")] : null,
     report.subscribed_only ? ["Only tickets", "you are subscribed to"] : null,
+    left ? [`${left} left out`, "closed or fully on production", report.hidden ? `${report.hidden.closed} closed in Timeline (left out for good), ${report.hidden.retired} old and fully on production (back when you commit something newer)` : ""] : null,
   ].filter(Boolean);
-  put(results,
+  const head = [
     Object.entries(report.errors || {}).map(([repo, message]) => h("p", { class: "error", role: "alert" }, `${repo} could not be read: ${message}`)),
     report.timeline_error ? h("p", { class: "error", role: "alert" }, `Timeline could not be read, so titles, sections and status checks are missing: ${report.timeline_error}`) : null,
-    h("div", { class: "cov-summary" },
-      coverageTile(tickets.length, "Tickets tracked", "", "Your tickets with commits, that you are subscribed to"),
-      coverageTile(attention.length, "Need attention", attention.length ? "bad" : "good", "Not where their Timeline stage says they should be"),
-      coverageTile(left, "Left out", "muted", report.hidden ? `${report.hidden.closed} closed in Timeline (left out for good), ${report.hidden.retired} old and fully on production (back when you commit something newer)` : "")),
-    h("div", { class: "cov-controls" },
-      h("div", { class: "cov-segmented", role: "group", "aria-label": "Which tickets to show" },
-        filter("attention", "Needs attention", attention.length), filter("all", "All tickets", tickets.length)),
-      h("div", { class: "cov-info" }, info.map(([a1, b1]) => h("span", { class: "cov-info-chip" }, a1, " ", h("strong", {}, b1))))),
-    sections.length ? sections.map(([key, group]) => coverageSection(key, group, report.checks, tickets.filter((t) => (t.section || "unknown") === key).length))
-      : h("p", { class: "cov-empty" }, tickets.length ? "Nothing needs attention. Every ticket is where its Timeline stage says it should be." : "No tickets found in the last 12 months of your commits."));
+  ];
+  // The info chips sit in the top bar, next to Check again.
+  if (coverageView.info) put(coverageView.info, info.map(([a1, b1, hint]) => h("span", { class: "cov-info-chip", title: hint || "" }, a1, " ", h("strong", {}, b1))));
+  if (!tickets.length) {
+    if (coverageView.tiles) put(coverageView.tiles);
+    put(results, head, h("p", { class: "cov-empty" }, "No tickets found in the last 12 months of your commits."));
+    return;
+  }
+
+  const tiles = coverageView.tiles || h("div", { class: "cov-tiles" });  // lives in the top bar, after the info chips
+  const list = h("div", { class: "cov-list", role: "listbox", "aria-label": "Tickets" });
+  const detail = h("div", { class: "cov-detail" });
+  const search = h("input", { type: "search", class: "cov-search", placeholder: "Search ticket or title", "aria-label": "Search tickets" });
+  search.value = coverageView.query;
+  const attention = tickets.filter(coverageAttention);
+  const tileDefs = [["attention", "Needs attention", attention.length],
+    ...COVERAGE_SECTION_ORDER.map((key) => [key, COVERAGE_SECTIONS[key][0], tickets.filter((t) => sectionOf(t) === key).length]).filter((d) => d[2])];
+
+  // Groups shown in the list: the filter picks one (or none = all); attention tickets lead and are not repeated below.
+  function groups() {
+    const q = coverageView.query.trim().toLowerCase().replace(/^#/, "");
+    const match = (t) => !q || String(t.issue).includes(q) || String(t.title || "").toLowerCase().includes(q);
+    const f = coverageView.filter;
+    const out = [];
+    if (!f || f === "attention") out.push(["attention", "Needs attention", tickets.filter((t) => coverageAttention(t) && match(t))]);
+    for (const key of COVERAGE_SECTION_ORDER) {
+      if (f && f !== key) continue;
+      out.push([key, COVERAGE_SECTIONS[key][0], tickets.filter((t) => sectionOf(t) === key && match(t) && (f === key || !coverageAttention(t)))]);
+    }
+    return out.filter((g) => g[2].length);
+  }
+  const folded = (key) => key !== "attention" && Boolean(coverageView.collapsed[key]) && !coverageView.filter && !coverageView.query.trim();
+
+  function draw(focus) {
+    const shown = groups();
+    const flat = shown.flatMap(([key, , items]) => (folded(key) ? [] : items));
+    if (!flat.some((t) => String(t.issue) === coverageView.selected)) coverageView.selected = flat.length ? String(flat[0].issue) : "";
+    put(tiles, tileDefs.map(([key, label, count]) => {
+      const tile = h("button", { type: "button", class: `cov-tile${key === "attention" ? " attn" : ""}${count ? "" : " zero"}${coverageView.filter === key ? " on" : ""}`, "aria-pressed": String(coverageView.filter === key) },
+        h("strong", {}, count), h("span", {}, label));
+      tile.addEventListener("click", () => { coverageView.filter = coverageView.filter === key ? "" : key; draw(false); });
+      return tile;
+    }));
+    put(list, shown.length ? shown.flatMap(([key, label, items]) => [
+      key === "attention"
+        ? h("div", { class: "cov-gh attn" }, label, h("span", { class: "count" }, items.length))
+        : (() => {
+          const gh = h("button", { type: "button", class: "cov-gh", title: COVERAGE_SECTIONS[key][1], "aria-expanded": String(!folded(key)) },
+            h("span", { class: `cov-dot s-${key}` }), label, h("span", { class: "count" }, items.length), h("span", { class: "cov-fold" }, folded(key) ? "▸" : "▾"));
+          gh.addEventListener("click", () => {
+            if (coverageView.filter || coverageView.query.trim()) return;
+            coverageView.collapsed[key] = !folded(key);
+            draw(false);
+          });
+          return gh;
+        })(),
+      ...(folded(key) ? [] : items.map((t) => coverageRow(t, String(t.issue) === coverageView.selected, pick))),
+    ]) : h("p", { class: "cov-empty" }, "No tickets match."));
+    const current = tickets.find((t) => String(t.issue) === coverageView.selected);
+    put(detail, current ? [coverageTicket(current, report.checks), h("p", { class: "note cov-stage-hint" }, (COVERAGE_SECTIONS[sectionOf(current)] || [])[1] || "")] : null);
+    if (focus) { const on = list.querySelector('[aria-selected="true"]'); if (on) on.focus(); }
+  }
+  function pick(issue, focus) { coverageView.selected = issue; draw(focus); }
+
+  list.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    const rows = [...list.querySelectorAll(".cov-li")];
+    const at = rows.findIndex((r) => r.getAttribute("aria-selected") === "true");
+    const next = rows[Math.max(0, Math.min(rows.length - 1, at + (event.key === "ArrowDown" ? 1 : -1)))];
+    if (!next) return;
+    event.preventDefault();
+    pick(next.dataset.issue, true);
+  });
+  search.addEventListener("input", () => { coverageView.query = search.value; draw(false); });
+
+  draw(false);
+  const layout = h("div", { class: "cov-layout" }, h("div", { class: "cov-side" }, search, list), detail);
+  put(results, head, layout);
+  // The page itself does not scroll: the two boxes fill what is left of the window and each scrolls on its own.
+  const fit = () => {
+    if (!layout.isConnected) { window.removeEventListener("resize", fit); return; }
+    layout.style.height = window.matchMedia("(max-width: 1000px)").matches ? "" : `${Math.max(320, window.innerHeight - layout.getBoundingClientRect().top - (parseFloat(getComputedStyle(view).paddingBottom) || 0))}px`;
+  };
+  if (coverageView.fit) window.removeEventListener("resize", coverageView.fit);
+  coverageView.fit = fit;
+  window.addEventListener("resize", fit);
+  fit();
+}
+
+// The popup behind Check again: every step the rebuild goes through, with how long each took.
+function coverageProgress() {
+  const steps = h("ol", { class: "cov-steps" });
+  const total = h("span", { class: "note" });
+  const problem = h("p", { class: "tl-modal-problem", role: "alert", hidden: true });
+  const close = h("button", { type: "button", class: "btn ghost" }, "Hide, keep running");
+  const dialog = h("dialog", { class: "tl-dialog tl-modal cov-progress", "aria-label": "Checking release coverage" });
+  const started = Date.now();
+  const stop = () => dialog.close();
+  close.addEventListener("click", stop);
+  dialog.append(h("div", { class: "cov-progress-body" },
+    h("header", {}, h("h2", {}, "Checking release coverage"), h("button", { type: "button", class: "tl-dialog-x", "aria-label": "Close", onclick: stop }, "×")),
+    h("p", { class: "tl-modal-text" }, "Reading git in both repositories and asking Timeline. Nothing is changed or pushed; closing this window does not stop the check."),
+    steps, problem,
+    h("footer", {}, total, close)));
+  dialog.addEventListener("close", () => { clearInterval(tick); dialog.remove(); });
+  const tick = setInterval(() => { total.textContent = `${Math.round((Date.now() - started) / 1000)} s`; }, 500);
+  document.body.append(dialog);
+  dialog.showModal();
+  const draw = (log, failed) => put(steps, (log || []).map((entry) => h("li", { class: entry.running ? "running" : failed && entry === log[log.length - 1] ? "failed" : "done" },
+    entry.running ? spinner() : h("span", { class: "cov-step-mark", "aria-hidden": "true" }, failed && entry === log[log.length - 1] ? "✗" : "✓"),
+    h("span", { class: "cov-step-text" }, entry.text),
+    h("span", { class: "cov-step-time" }, entry.seconds === null || entry.seconds === undefined ? "" : `${entry.seconds} s`))));
+  return {
+    update: (log) => { if (dialog.isConnected) draw(log, false); },
+    done: (log, report) => {
+      if (!dialog.isConnected) return;
+      draw(log, false);
+      clearInterval(tick);
+      total.textContent = `Done in ${Math.round((Date.now() - started) / 1000)} s · ${report.tickets.length} ticket${report.tickets.length === 1 ? "" : "s"}`;
+      close.textContent = "Close";
+    },
+    fail: (log, message) => {
+      if (!dialog.isConnected) return;
+      draw(log, true);
+      clearInterval(tick);
+      problem.textContent = message;
+      problem.hidden = false;
+      total.textContent = "Stopped";
+      close.textContent = "Close";
+    },
+  };
 }
 
 async function checkCoverage(results, stamp, button, force) {
   button.disabled = true;
+  openPrs.loaded = false;
   let started = 0;
+  let progress = null;
   try {
     let { report } = await api("/api/coverage");
     if (report) {
       renderCoverage(report, results);
-      stamp.textContent = `Checked ${ago(utc(report.generated_at))}`;
+      setStamp(stamp, report.generated_at, utc);
     }
+    refreshOpenPrs();
     const stale = !report || Date.now() - new Date(utc(report.generated_at)).getTime() > COVERAGE_STALE_MS;
     if (force || stale) {
       started = Date.now();
-      stamp.textContent = "Checking…";
+      stamp.textContent = "";
+      if (force) progress = coverageProgress();
       if (!report) put(results, h("p", { class: "note" }, "Reading git in both repositories…"));
       const poll = setInterval(async () => {
         try {
-          const { step } = await api("/api/coverage");
-          if (step) stamp.textContent = `${step}… (${Math.round((Date.now() - started) / 1000)} s)`;
+          const { log } = await api("/api/coverage");
+          if (progress) progress.update(log);
         } catch { /* the build request reports real errors */ }
       }, 700);
       try {
@@ -2960,9 +3245,12 @@ async function checkCoverage(results, stamp, button, force) {
         clearInterval(poll);
       }
       renderCoverage(report, results);
-      stamp.textContent = `Checked ${ago(utc(report.generated_at))}`;
+      setStamp(stamp, report.generated_at, utc);
+      refreshOpenPrs();
+      if (progress) progress.done((await api("/api/coverage").catch(() => ({}))).log, report);
     }
   } catch (error) {
+    if (progress) progress.fail((await api("/api/coverage").catch(() => ({}))).log, error.message);
     stamp.textContent = "";
     results.prepend(h("p", { class: "error", role: "alert" }, error.message));
   } finally {
@@ -2976,11 +3264,13 @@ async function showCoverage(force) {
   jiraStatuses = new Map(jira ? jira.cards.map((c) => [String(c.issue_number), c.status]) : []);
   jiraColumns = jira ? jira.statuses : [];
   const results = h("div", { id: "coverage-results" });
-  const stamp = h("span", { class: "cov-stamp" });
-  const check = h("button", { type: "button", class: "btn" }, "Check again");
+  const stamp = h("span", { class: "stamp" });
+  const check = h("button", { type: "button", class: "btn ghost" }, "Check again");
   check.addEventListener("click", () => checkCoverage(results, stamp, check, true));
+  coverageView.info = h("div", { class: "cov-info" });
+  coverageView.tiles = h("div", { class: "cov-tiles" });
   put(view, h("div", { class: "cov-page" },
-    h("div", { class: "cov-page-head" }, check, stamp),
+    h("div", { class: "cov-page-head" }, check, stamp, coverageView.info, coverageView.tiles),
     results));
   await checkCoverage(results, stamp, check, Boolean(force));
 }
@@ -3000,7 +3290,7 @@ const SOURCE_ICONS = {
 };
 const PAGE_SOURCES = {
   planner: ["live", "cache", "db", "git"], workflows: ["live", "cache", "db"], changes: ["db"], timeline: ["db"],
-  release: ["cache", "git"], coverage: ["db", "git"], task: ["live", "db", "git"], work: ["git"], jira: ["live", "db"],
+  release: ["cache", "git"], coverage: ["db", "git"], task: ["live", "db", "git"], jira: ["live", "db"],
 };
 
 function sourceIcons(kinds) {
@@ -3027,7 +3317,6 @@ const HELP_TOPIC_ICON = {
   release: "M12 2l4 8h-8zM12 10v12M8 22h8",
   coverage: "M9 11l3 3 8-8M3 12a9 9 0 1 0 9-9",
   task: "M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9",
-  work: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
   jira: "M4 4h5v16H4zM10 4h5v10h-5zM16 4h4v6h-4z",
   icons: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 8h.01M11 12h1v4h1",
   glossary: "M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5zM4 19.5V21h16",
@@ -3114,7 +3403,7 @@ async function showHelp(arg) {
         ["Task files", "timeline/<issue>/", "task.md and the documents a workflow writes (analysis, runs). Kept out of git."],
         ["Request log", "logs/timeline-requests-<date>.jsonl", "One line per call to Timeline: time, path, status, duration. No credentials or query text."],
         ["Boards and repos", "timeline-desk.json", "Which Timeline board belongs to which repo, and your name. Read again on every request."],
-        ["This browser", "localStorage", "Only small conveniences: timeline filters, when you last saw the Changes page."],
+        ["This browser", "localStorage", "Only small conveniences: the filters and searches on each page, when you last saw the Changes page."],
       ].map(([name, where, text]) => h("tr", {}, h("th", {}, name), h("td", {}, h("code", {}, where)), h("td", {}, text)))))),
     block("trouble", "Troubleshooting", rows(HELP.trouble)));
   // The landing page is a dashboard of tiles; a tile opens that topic on its own page.
@@ -3167,7 +3456,6 @@ async function route(force) {
     else if (name === "timeline") await showTimeline(force);
     else if (name === "release") await showRelease(force);
     else if (name === "coverage") await showCoverage(force);
-    else if (name === "work") await showWork();
     else if (name === "jira") await showJira();
     else if (name === "workflows") await showWorkflows(arg);
     else if (name === "help") await showHelp(arg);

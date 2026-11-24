@@ -38,7 +38,7 @@ def setup(tmp_path):
     git(tmp_path, "clone", "-q", str(origin), str(repo))
     config_file = tmp_path / "timeline-desk.json"
     config_file.write_text(json.dumps({
-        "repos": {"15033": {"name": "duell-admin", "path": "duell-admin", "base": "master"}},
+        "repos": {"15033": {"name": "duell-admin", "path": "duell-admin", "base": "master", "workspace": "worktree"}},
         "claude": "/opt/node/bin/claude",
         "terminal": "gnome-terminal",
     }))
@@ -756,3 +756,28 @@ def test_no_background_run_modes_are_left(setup):
     started = run(setup)
     assert "-p" not in setup["launched"][-1] and "gnome-terminal" == setup["launched"][-1][0]
     assert "mode" not in started
+
+
+def test_branch_mode_prompt_and_runs_in_main_checkout(setup, monkeypatch):
+    cfg = setup["config"]
+    cfg["repos"]["15033"]["workspace"] = "branch"
+    repo = str(setup["repo"])
+    wf.start_workflow("5001", "15033", "intake", "New report", cfg, setup["base"], now=NOW)
+    started = run(setup)
+    assert started["path"] == repo and started["branch"] == "5001-new-report"
+    prompt = prompt_of(setup["launched"][-1])
+    assert "main checkout of duell-admin" in prompt and "git worktree" not in prompt
+    assert git(setup["repo"], "symbolic-ref", "--short", "HEAD").strip() == "5001-new-report"
+    # a second task can't switch the shared checkout while 5001's terminal is still open
+    with pytest.raises(ValueError, match="#5001 run .* is still open"):
+        wf.start_workflow("5002", "15033", "intake", "Other", cfg, setup["base"], now=NOW)
+    assert git(setup["repo"], "symbolic-ref", "--short", "HEAD").strip() == "5001-new-report"
+    # once that terminal is gone, it can
+    monkeypatch.setattr(wf.work_session, "session_alive", lambda session_id: False)
+    wf.start_workflow("5002", "15033", "intake", "Other", cfg, setup["base"], now=NOW)
+    assert git(setup["repo"], "symbolic-ref", "--short", "HEAD").strip() == "5002-other"
+
+
+def test_worktree_mode_prompt_unchanged():
+    repo = {"name": "duell-admin", "base": "master", "path": "/repos/duell-admin", "workspace": "worktree"}
+    assert "git worktree of duell-admin" in wf.build_prompt("develop", "6034", repo, "6034-x", 7)

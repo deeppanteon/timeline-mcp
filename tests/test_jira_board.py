@@ -19,7 +19,8 @@ class TestStore:
 
     def test_add_and_list_keep_only_number_title_status(self, tmp_path):
         card = jb.add_card(5, "Task 5", "To Do", str(tmp_path), NOW)
-        assert card == {"issue_number": "5", "title": "Task 5", "status": "To Do", "url": None, "support": False}
+        assert card == {"issue_number": "5", "title": "Task 5", "status": "To Do", "url": None, "support": False,
+                        "pr_created": False}
         assert jb.list_cards(str(tmp_path)) == [card]
 
     def test_card_links_to_its_timeline_page_when_the_code_is_known(self, tmp_path):
@@ -40,6 +41,25 @@ class TestStore:
         jb.add_card(5, "Task 5", "To Do", str(tmp_path), NOW)
         jb.move_card(5, "On QA", str(tmp_path), NOW)
         assert jb.list_cards(str(tmp_path))[0]["status"] == "On QA"
+
+    def test_pr_created_flag_is_per_column_and_local(self, tmp_path):
+        base = str(tmp_path)
+        jb.add_card(5, "Task 5", "Ready for QA", base, NOW)
+        assert jb.list_cards(base)[0]["pr_created"] is False
+        jb.move_card(5, "Ready for QA", base, NOW, pr_created=True)
+        assert jb.list_cards(base)[0]["pr_created"] is True
+        jb.move_card(5, "Ready for QA", base, NOW)  # a plain drop in the same column keeps it
+        assert jb.list_cards(base)[0]["pr_created"] is True
+        assert len(jb.pending_updates(base)) == 1  # flipping the flag is not queued for the bot
+        jb.move_card(5, "Ready for QA", base, NOW, pr_created=False)
+        assert jb.list_cards(base)[0]["pr_created"] is False
+        jb.move_card(5, "Ready for QA", base, NOW, pr_created=True)
+        jb.move_card(5, "On QA", base, NOW)  # leaving the column clears it
+        assert jb.list_cards(base)[0]["pr_created"] is False
+        jb.move_card(5, "Ready for Release", base, NOW, pr_created=True)  # a move can set it at once
+        assert jb.list_cards(base)[0]["pr_created"] is True
+        with pytest.raises(ValueError):
+            jb.move_card(5, "Done", base, NOW, pr_created=True)
 
     def test_move_unknown_card_or_status(self, tmp_path):
         with pytest.raises(LookupError):
@@ -177,7 +197,7 @@ class TestDashboard:
     def test_add_takes_the_title_from_timeline(self, client):
         response = client.post("/api/jira/cards", json={"issue": "5", "status": "In Dev", "title": "ignored"}, headers=self.G)
         assert response.json()["card"] == {"issue_number": "5", "title": "Task 5", "status": "In Dev",
-                                           "url": f"{pc.BASE_URL}/tasks#/list/15033/edit/5", "support": False}
+                                           "url": f"{pc.BASE_URL}/tasks#/list/15033/edit/5", "support": False, "pr_created": False}
         assert client.get("/api/jira/board").json()["cards"][0]["title"] == "Task 5"
 
     def test_support_tasks_list_and_can_be_added_highlighted(self, client):

@@ -18,6 +18,8 @@ import task_events
 REMOVED = "Removed"  # the to_status the bot is told when a card is taken off the board
 STATUSES = ["To Do", "In Progress", "In Dev", "Dev Done", "Ready for QA", "On QA", "Ready for Release", "Done"]
 
+PR_STATUSES = ["Ready for QA", "Ready for Release"]  # the columns whose cards carry the "PR created" flag (set by hand)
+
 
 def _now_iso(now: Optional[datetime]) -> str:
     return (now or datetime.now()).isoformat(timespec="seconds")
@@ -35,12 +37,13 @@ def list_cards(base_dir: Optional[str] = None) -> List[Dict[str, Any]]:
         return []
     try:
         rows = conn.execute(
-            "SELECT issue_number, title, status, code, support FROM jira_cards ORDER BY added_at, issue_number"
+            "SELECT issue_number, title, status, code, support, pr_created FROM jira_cards ORDER BY added_at, issue_number"
         ).fetchall()
     finally:
         conn.close()
-    return [{"issue_number": i, "title": t, "status": s, "url": pc.task_url(i, c), "support": bool(sp)}
-            for i, t, s, c, sp in rows]
+    return [{"issue_number": i, "title": t, "status": s, "url": pc.task_url(i, c), "support": bool(sp),
+             "pr_created": bool(pr)}
+            for i, t, s, c, sp, pr in rows]
 
 
 OVERVIEW_EVENTS = 150  # newest timeline events sent to the board's task panel
@@ -106,7 +109,7 @@ def board(base_dir: Optional[str] = None) -> Dict[str, Any]:
     since = _in_column_since(base_dir)
     for card in cards:
         card["since"] = since.get(str(card["issue_number"]))
-    return {"statuses": STATUSES, "cards": cards}
+    return {"statuses": STATUSES, "pr_statuses": PR_STATUSES, "cards": cards}
 
 
 def list_support_tasks(headers: Dict[str, str], projects: Iterable[Dict[str, Any]],
@@ -181,7 +184,8 @@ def add_cards(tasks: List[Dict[str, Any]], status: str, base_dir: Optional[str] 
     finally:
         conn.close()
     return [{"issue_number": t["issue_number"], "title": t["title"], "status": status,
-             "url": pc.task_url(t["issue_number"], t.get("code")), "support": bool(t.get("support"))} for t in tasks]
+             "url": pc.task_url(t["issue_number"], t.get("code")), "support": bool(t.get("support")),
+             "pr_created": False} for t in tasks]
 
 
 def add_card(issue: Any, title: str, status: str, base_dir: Optional[str] = None,
@@ -190,26 +194,40 @@ def add_card(issue: Any, title: str, status: str, base_dir: Optional[str] = None
 
 
 def move_card(issue: Any, status: str, base_dir: Optional[str] = None,
-              now: Optional[datetime] = None) -> Dict[str, Any]:
+              now: Optional[datetime] = None, pr_created: Optional[bool] = None) -> Dict[str, Any]:
+    """
+    Moves a card to a column. The "PR created" flag belongs to one column, so it is cleared by a move to
+    another column; `pr_created` sets it for a move into (or a drop within) Ready for QA / Ready for Release.
+    Changing only the flag is a local note: nothing is queued for the Jira bot.
+    """
     issue = task_events._issue(issue)
     status = _status(status)
     conn = pc._open_planner_db(base_dir, create=False)
     if conn is None:
         raise LookupError(f"Task #{issue} isn't on the board.")
     try:
-        row = conn.execute("SELECT title, status FROM jira_cards WHERE issue_number = ?", (issue,)).fetchone()
+        row = conn.execute("SELECT title, status, pr_created FROM jira_cards WHERE issue_number = ?", (issue,)).fetchone()
         if row is None:
             raise LookupError(f"Task #{issue} isn't on the board.")
-        title, previous = row
+        title, previous, was_created = row
+        if pr_created and status not in PR_STATUSES:
+            raise ValueError(f"A PR can only be marked created in {' or '.join(PR_STATUSES)}.")
+        flag = int(bool(pr_created)) if pr_created is not None else (int(bool(was_created)) if previous == status else 0)
+        if status not in PR_STATUSES:
+            flag = 0
         if previous != status:  # dropping a card where it already is changes nothing
             when = _now_iso(now)
-            conn.execute("UPDATE jira_cards SET status = ?, updated_at = ? WHERE issue_number = ?", (status, when, issue))
+            conn.execute("UPDATE jira_cards SET status = ?, pr_created = ?, updated_at = ? WHERE issue_number = ?",
+                         (status, flag, when, issue))
             conn.execute("INSERT INTO jira_events (issue_number, title, from_status, to_status, occurred_at) VALUES (?, ?, ?, ?, ?)",
                          (issue, title, previous, status, when))
             conn.commit()
+        elif flag != was_created:
+            conn.execute("UPDATE jira_cards SET pr_created = ? WHERE issue_number = ?", (flag, issue))
+            conn.commit()
     finally:
         conn.close()
-    return {"issue_number": issue, "title": title, "status": status}
+    return {"issue_number": issue, "title": title, "status": status, "pr_created": bool(flag)}
 
 
 def remove_card(issue: Any, base_dir: Optional[str] = None, now: Optional[datetime] = None) -> Dict[str, Any]:

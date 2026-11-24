@@ -39,7 +39,7 @@ def setup(tmp_path):
     git(repo, "config", "user.name", "T")
     config_file = tmp_path / "timeline-desk.json"
     config_file.write_text(json.dumps({
-        "repos": {"15033": {"name": "duell-admin", "path": "duell-admin", "base": "master"}},
+        "repos": {"15033": {"name": "duell-admin", "path": "duell-admin", "base": "master", "workspace": "worktree"}},
         "claude": "/opt/node/bin/claude",
         "terminal": "gnome-terminal",
     }))
@@ -68,6 +68,10 @@ def test_load_config_defaults(tmp_path):
     repo = ws.load_config(str(cfg))["repos"]["1"]
     assert repo["path"] == os.path.normpath(str(tmp_path / "../x"))
     assert repo["worktrees"] == repo["path"] + "-worktrees" and repo["base"] == "master" and repo["name"] == "x"
+    assert repo["workspace"] == "branch"  # tasks run in the main checkout unless the repo opts into worktrees
+    cfg.write_text(json.dumps({"repos": {"1": {"path": "../x", "workspace": "folder"}}}))
+    with pytest.raises(ws.WorkSessionError):
+        ws.load_config(str(cfg))
     cfg.write_text("{bad")
     with pytest.raises(ws.WorkSessionError):
         ws.load_config(str(cfg))
@@ -77,15 +81,14 @@ def test_worktree_created_then_reused(setup):
     cfg = setup["config"]
     result = ws.worktree_for(cfg, "15033", "5001", "New report")
     path = os.path.join(cfg["repos"]["15033"]["worktrees"], "duell-admin-5001")  # the folder is named by the ID only
-    assert result == {"path": path, "branch": "5001-new-report", "created": True, "repo": "duell-admin"}
+    assert result == {"path": path, "branch": "5001-new-report", "created": True, "repo": "duell-admin",
+                      "workspace": "worktree"}
     assert os.path.isfile(os.path.join(path, "a.txt"))
     again = ws.worktree_for(cfg, "15033", "5001", "Renamed")
     assert again["created"] is False and again["path"] == path
     # Found by its folder too, even after the branch is renamed.
     git(path, "branch", "-m", "renamed-by-hand")
     assert ws.worktree_for(cfg, "15033", "5001", "x")["path"] == path
-    listed = ws.list_worktrees(cfg)
-    assert [(w["issue_id"], w["branch"]) for w in listed] == [("5001", "renamed-by-hand")]
 
 
 def test_worktree_reuses_remote_branch(setup):
@@ -110,34 +113,6 @@ def test_terminal_command_passes_args_and_exit_file(setup):
     assert ws.launch_env(setup["config"])["PATH"].startswith("/opt/node/bin" + os.pathsep)
 
 
-def test_list_and_remove(setup):
-    cfg = setup["config"]
-    clean = ws.worktree_for(cfg, "15033", "5001", "Clean one")["path"]
-    work = ws.worktree_for(cfg, "15033", "5002", "Work one")["path"]
-    (setup["repo"].parent / "duell-admin-worktrees" / "duell-admin-5002" / "c.txt").write_text("c\n")
-
-    items = {i["issue_id"]: i for i in ws.list_worktrees(cfg)}
-    assert set(items) == {"5001", "5002"}  # the main checkout isn't listed
-    assert items["5001"]["dirty"] == 0 and items["5001"]["merged"] is True and items["5001"]["unpushed"] == 0
-    assert items["5002"]["dirty"] == 1 and items["5002"]["size"] > 0
-
-    with pytest.raises(ws.WorkSessionError):  # uncommitted changes: git refuses
-        ws.remove_worktree(cfg, work)
-    git(work, "add", ".")
-    git(work, "commit", "-qm", "TL #5002 work")
-    assert {i["issue_id"]: i for i in ws.list_worktrees(cfg)}["5002"]["unpushed"] == 1
-
-    result = ws.remove_worktree(cfg, work, delete_branch=True)
-    assert result["branch_deleted"] is False and "Kept the branch" in result["branch_note"]
-    assert "5002-work-one" in git(setup["repo"], "branch", "--list", "5002-*")
-
-    result = ws.remove_worktree(cfg, clean, delete_branch=True)
-    assert result["branch_deleted"] is True and not os.path.exists(clean)
-
-    with pytest.raises(ValueError):
-        ws.remove_worktree(cfg, str(setup["repo"]))  # never the main checkout
-
-
 def test_worktree_timeline_links_to_main_checkout(setup):
     cfg, repo = setup["config"], setup["repo"]
     path = ws.worktree_for(cfg, "15033", "5001", "New report")["path"]
@@ -149,13 +124,12 @@ def test_worktree_timeline_links_to_main_checkout(setup):
 
     # git ignores the link (a `timeline/` gitignore line alone wouldn't), so the worktree stays clean
     assert git(path, "status", "--porcelain") == ""
-    assert {i["issue_id"]: i for i in ws.list_worktrees(cfg)}["5001"]["dirty"] == 0
     excluded = open(repo / ".git" / "info" / "exclude").read()
     ws.worktree_for(cfg, "15033", "5001", "New report")
     assert open(repo / ".git" / "info" / "exclude").read() == excluded  # added once
 
     # removing the worktree drops the link, never the task docs
-    ws.remove_worktree(cfg, path)
+    git(repo, "worktree", "remove", path)
     assert not os.path.exists(path) and (repo / "timeline" / "5001" / "analysis.md").read_text() == "plan\n"
 
 
@@ -198,12 +172,53 @@ def test_work_endpoints(client, setup):
     assert client.get("/api/work/config").json() == {"boards": {"15033": "duell-admin"}, "projects": []}
     assert client.post("/api/work/start", json={"issue": "5001", "code": "15033"}).status_code in (404, 405)  # gone
 
-    h = {"X-Timeline-Desk": "1"}
-    ws.worktree_for(setup["config"], "15033", "5001", "From Timeline")
 
-    listed = client.get("/api/work/worktrees").json()["worktrees"]
-    assert [w["branch"] for w in listed] == ["5001-from-timeline"]
-    assert client.post("/api/work/remove", json={"path": listed[0]["path"]}).status_code == 403
-    removed = client.post("/api/work/remove", json={"path": listed[0]["path"]}, headers=h).json()
-    assert removed["removed"] == listed[0]["path"]
-    assert client.post("/api/work/remove", json={"path": "/etc"}, headers=h).status_code == 400
+def branch_mode(setup):
+    cfg = setup["config"]
+    cfg["repos"]["15033"]["workspace"] = "branch"
+    return cfg
+
+
+def test_branch_mode_checks_out_in_main_checkout(setup):
+    cfg, repo = branch_mode(setup), setup["repo"]
+    result = ws.worktree_for(cfg, "15033", "5001", "New report")
+    assert result["path"] == str(repo) and result["workspace"] == "branch" and result["created"]
+    assert result["branch"] == "5001-new-report"
+    assert git(repo, "symbolic-ref", "--short", "HEAD").strip() == "5001-new-report"
+    assert git(repo, "worktree", "list", "--porcelain").count("worktree ") == 1  # no extra folder
+    assert not os.path.exists(cfg["repos"]["15033"]["worktrees"])
+    # already on it: kept as is, even with uncommitted work (it's this task's)
+    (repo / "a.txt").write_text("changed\n")
+    again = ws.worktree_for(cfg, "15033", "5001", "Renamed")
+    assert again["branch"] == "5001-new-report" and not again["created"]
+
+
+def test_branch_mode_reuses_remote_branch(setup):
+    cfg, repo = branch_mode(setup), setup["repo"]
+    result = ws.worktree_for(cfg, "15033", "6034", "Whatever")
+    assert result["branch"] == "6034-existing" and result["path"] == str(repo)
+    assert git(repo, "rev-parse", "--abbrev-ref", "6034-existing@{upstream}").strip() == "origin/6034-existing"
+    assert (repo / "b.txt").exists()
+
+
+def test_branch_mode_refuses_uncommitted_changes(setup):
+    cfg, repo = branch_mode(setup), setup["repo"]
+    (repo / "a.txt").write_text("someone's work\n")
+    with pytest.raises(ws.WorkSessionError, match="uncommitted changes on master"):
+        ws.worktree_for(cfg, "15033", "5001", "x")
+    assert git(repo, "symbolic-ref", "--short", "HEAD").strip() == "master"
+    assert (repo / "a.txt").read_text() == "someone's work\n"  # untouched
+    (repo / "a.txt").write_text("a\n")
+    (repo / "new.txt").write_text("untracked\n")  # untracked files don't block a switch
+    assert ws.worktree_for(cfg, "15033", "5001", "x")["branch"] == "5001-x"
+
+
+def test_branch_mode_refuses_branch_held_by_worktree(setup):
+    cfg = setup["config"]
+    old = ws.worktree_for(cfg, "15033", "5001", "x")  # made while the repo used worktrees
+    branch_mode(setup)
+    with pytest.raises(ws.WorkSessionError, match="still checked out in the worktree"):
+        ws.worktree_for(cfg, "15033", "5001", "x")
+    git(setup["repo"], "worktree", "remove", old["path"])
+    result = ws.worktree_for(cfg, "15033", "5001", "x")
+    assert result["path"] == str(setup["repo"]) and result["branch"] == old["branch"] and result["created"] is False

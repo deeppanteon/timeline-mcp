@@ -128,7 +128,37 @@ class CoverageCache:
     def __init__(self):
         self.report: Optional[Dict[str, Any]] = None
         self.step: Optional[str] = None
+        self.log: List[Dict[str, Any]] = []  # the steps of the latest rebuild: text, start time, seconds once finished
+        self.error: Optional[str] = None
         self.lock = threading.Lock()
+
+    def begin(self) -> None:
+        self.log, self.error = [], None
+        self.note("Starting")
+
+    def note(self, text: str) -> None:
+        """A new step starts; the one before it is finished."""
+        self._close()
+        self.log.append({"text": text, "at": time.time(), "seconds": None})
+        self.step = text
+
+    def end(self, error: Optional[str] = None) -> None:
+        self._close()
+        self.step, self.error = None, error
+
+    def _close(self) -> None:
+        if self.log and self.log[-1]["seconds"] is None:
+            self.log[-1]["seconds"] = round(time.time() - self.log[-1]["at"], 1)
+
+    def steps(self) -> List[Dict[str, Any]]:
+        """The log for the page: a running step reports how long it has been running."""
+        now, running = time.time(), self.step is not None
+        out = []
+        for i, entry in enumerate(list(self.log)):
+            live = running and i == len(self.log) - 1
+            out.append({"text": entry["text"], "running": live,
+                        "seconds": round(now - entry["at"], 1) if live else entry["seconds"]})
+        return out
 
 
 def _respond(call: Callable[[], Any]) -> JSONResponse:
@@ -309,7 +339,7 @@ def create_app(
         return _respond(build)
 
     def api_coverage(request: Request):
-        return JSONResponse({"report": coverage.report, "step": coverage.step})
+        return JSONResponse({"report": coverage.report, "step": coverage.step, "log": coverage.steps(), "error": coverage.error})
 
     def api_coverage_refresh(request: Request):
         # Runs git fetch in both checkouts, so it is a POST with the header guard.
@@ -362,6 +392,17 @@ def create_app(
             return release_check.draft_pr(where["repo_dir"], params.get("issue"), params.get("base"),
                                           params.get("title") or "", repo_name=where["repo_name"], **pr_kwargs)
         return _respond(draft)
+
+    def api_pr_open(request: Request):
+        def collect():
+            found: List[Dict[str, Any]] = []
+            for name in release_check.REPO_SPECS:
+                try:
+                    found += release_check.open_prs(pos_dir if name == release_check.POS else repo_dir, name, **pr_kwargs)
+                except release_check.ReleaseCheckError:
+                    continue  # a repo that can't be read just shows no PR numbers
+            return {"prs": found}
+        return _respond(collect)
 
     async def api_pr_describe(request: Request):
         # Runs `claude -p` (your Claude usage), so it is a POST with the header guard like the other actions.
@@ -587,22 +628,6 @@ def create_app(
         return _respond(lambda: workflow.read_transcript(request.path_params["issue"], int(request.path_params["run_id"]),
                                                           base_dir, claude_home))
 
-    def api_work_list(request: Request):
-        return _respond(lambda: {"worktrees": work_session.list_worktrees(work_config(), **git_kwargs)})
-
-    async def api_work_remove(request: Request):
-        denied = guarded(request)
-        if denied:
-            return denied
-        body = await json_body(request)
-
-        def remove():
-            path = body.get("path")
-            if not isinstance(path, str) or not path:
-                raise ValueError("Which worktree? Pass its path.")
-            return work_session.remove_worktree(work_config(), path, bool(body.get("delete_branch")), **git_kwargs)
-        return await run_in_threadpool(_respond, remove)
-
     def api_events(request: Request):
         params = request.query_params
         split = lambda key: [v for v in params.get(key, "").replace(",", " ").split() if v]
@@ -753,7 +778,8 @@ def create_app(
         if denied:
             return denied
         body = await json_body(request)
-        return _respond(lambda: {"card": jira_board.move_card(request.path_params["issue"], body.get("status"), base_dir)})
+        return _respond(lambda: {"card": jira_board.move_card(request.path_params["issue"], body.get("status"), base_dir,
+                                                                pr_created=body.get("pr_created"))})
 
     def api_jira_remove(request: Request):
         denied = guarded(request)
@@ -791,6 +817,7 @@ def create_app(
         Route("/api/pr-guard", api_pr_guard),
         Route("/api/pr/draft", api_pr_draft),
         Route("/api/pr/describe", api_pr_describe, methods=["POST"]),
+        Route("/api/pr/open", api_pr_open),
         Route("/api/pr/create", api_pr_create, methods=["POST"]),
         Route("/api/project/{project}/tasks", api_project_tasks),
         Route("/api/about", api_about),
@@ -806,8 +833,6 @@ def create_app(
         Route("/api/workflow/{issue}/findings/{finding:int}", api_finding_classify, methods=["POST"]),
         Route("/api/workflow/{issue}/doc/{name}", api_workflow_doc),
         Route("/api/workflow/{issue}/runs/{run_id:int}/transcript", api_workflow_transcript),
-        Route("/api/work/worktrees", api_work_list),
-        Route("/api/work/remove", api_work_remove, methods=["POST"]),
         Mount("/static", _FreshStaticFiles(directory=WEB_DIR), name="static"),
     ]
     middleware = [
@@ -824,7 +849,7 @@ def run_coverage(cache: CoverageCache, builder: Callable[..., Any], config: Dict
                  subscribed: Optional[Callable[[], Any]] = None) -> Dict[str, Any]:
     """Rebuilds the coverage report into `cache`; one rebuild at a time (a second caller waits, then gets that result)."""
     with cache.lock:
-        cache.step = "Starting"
+        cache.begin()
         try:
             cache.report = builder(
                 dirs={release_check.ADMIN: repo_dir, release_check.POS: pos_dir},
@@ -832,10 +857,12 @@ def run_coverage(cache: CoverageCache, builder: Callable[..., Any], config: Dict
                 base_dir=base_dir,
                 status_lookup=status_lookup,
                 subscribed=subscribed,
-                progress=lambda text: setattr(cache, "step", text),
+                progress=cache.note,
             )
-        finally:
-            cache.step = None
+        except Exception as exc:
+            cache.end(str(exc) or exc.__class__.__name__)
+            raise
+        cache.end()
         # Each ticket's Timeline page: its project's list code is in timeline-desk.json (repos keyed by that code).
         codes = {str(repo["id"]): code for code, repo in (config.get("repos") or {}).items() if repo.get("id")}
         for ticket in (cache.report or {}).get("tickets", []):

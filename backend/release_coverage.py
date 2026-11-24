@@ -384,7 +384,6 @@ def build_repo_coverage(repo: _Repo, repo_name: str, issues: Iterable[str], base
 # Timeline's stage says what to expect of the code, so the page groups tickets by it: a ticket still in development
 # is not expected on QA or production, an approved one is expected on production.
 SECTION_ORDER = ["dev", "qa", "qa_blocked", "approved", "live", "unknown"]
-_ATTENTION_STATES = {"not_released", "not_on_prod", "partial"}
 
 
 def section_for(timeline: Optional[Dict[str, Any]]) -> str:
@@ -397,28 +396,9 @@ def section_for(timeline: Optional[Dict[str, Any]]) -> str:
     return {"before qa": "dev", "in qa": "qa", "qa blocked": "qa_blocked", "qa approved": "approved"}.get(stage, "unknown")
 
 
-def needs_attention(ticket: Dict[str, Any]) -> bool:
-    """
-    Whether the ticket deserves a look given its section. Anything with a flag or a dropped commit does. Beyond that:
-    in development nothing is expected of the code; in QA every commit should be on QA; approved or live tickets
-    should be on production; with no Timeline status the code state alone decides.
-    """
-    state, section = ticket["state"], ticket["section"]
-    if ticket["flags"] or state == "dropped":
-        return True
-    if section == "dev":
-        return False
-    if section in ("qa", "qa_blocked"):
-        return state in _ATTENTION_STATES
-    if section in ("approved", "live"):
-        return state != "shipped"
-    return state in _ATTENTION_STATES
-
-
 def classify(ticket: Dict[str, Any]) -> Dict[str, Any]:
-    """Sets `section` and `attention` on the ticket from its Timeline status, flags and code state."""
+    """Sets `section` on the ticket from its Timeline status."""
     ticket["section"] = section_for(ticket.get("timeline"))
-    ticket["attention"] = needs_attention(ticket)
     return ticket
 
 
@@ -577,7 +557,7 @@ def lookup_ids(tickets: List[Dict[str, Any]], now: Optional[dt.datetime] = None,
 def attach_timeline(report: Dict[str, Any], status_lookup: Optional[Any], now: Optional[dt.datetime] = None,
                     days: int = STATUS_DAYS) -> Dict[str, Any]:
     """
-    Adds `title`, `timeline` ({release_state, task_status, stage_status, project_id}), `flags`, `section` and `attention` to each ticket from one
+    Adds `title`, `timeline` ({release_state, task_status, stage_status, project_id}), `flags`, and `section` to each ticket from one
     `status_lookup(ids)` call. Tickets Timeline reports closed are taken out of the report and listed in `closed`.
     If Timeline cannot be reached the git report stays as it is, with `timeline_error` set.
     """
@@ -599,7 +579,7 @@ def attach_timeline(report: Dict[str, Any], status_lookup: Optional[Any], now: O
         if not row or row.get("error"):
             continue
         t["title"] = row.get("title") or ""
-        t["timeline"] = {k: row.get(k) for k in ("release_state", "task_status", "stage_status", "project_id")}
+        t["timeline"] = {k: row.get(k) for k in ("release_state", "task_status", "stage_status", "project_id", "stages")}
         t["flags"] = timeline_flags(t, row)
     for t in report["tickets"]:
         classify(t)
@@ -619,7 +599,7 @@ def combine(per_repo: Dict[str, Dict[str, Dict[str, Any]]], errors: Optional[Dic
         repos = {name: rows[issue] for name, rows in per_repo.items() if issue in rows}
         state = min((r["state"] for r in repos.values()), key=STATE_ORDER.index)
         tickets.append({"issue": issue, "state": state, "repos": repos, "unread": sorted(errors),
-                        "title": "", "timeline": None, "flags": [], "section": "unknown", "attention": False})
+                        "title": "", "timeline": None, "flags": [], "section": "unknown"})
         classify(tickets[-1])
     tickets.sort(key=lambda t: (STATE_ORDER.index(t["state"]), -int(t["issue"])))
     return {"tickets": tickets, "errors": errors}
@@ -682,6 +662,8 @@ def build_coverage(
         except ReleaseCheckError as exc:
             errors[name] = str(exc)
             record_failure(base_dir, name, str(exc), now)
+    if subscribed:
+        step("Reading your subscribed tickets from Timeline")
     mine = {str(i) for i in subscribed()} if subscribed else None
     issues = set(dates) - closed_issues(base_dir)  # closed in Timeline earlier: nothing more is read for them
     if mine is not None:
@@ -692,8 +674,9 @@ def build_coverage(
     unretire(base_dir, back)  # you committed something newer: it is checked again
     issues -= {i for i in retired if i not in back}
     per_repo: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    step(f"{len(issues)} tickets to check ({len(dates) - len(issues)} left out: closed, retired or not subscribed)")
     for name, repo in repos.items():
-        step(f"Checking {len(issues)} tickets in {name}")
+        step(f"Comparing {len(issues)} tickets with QA and production in {name}")
         try:
             per_repo[name] = build_repo_coverage(repo, name, issues, base_dir, now, mine)
         except ReleaseCheckError as exc:
@@ -702,6 +685,7 @@ def build_coverage(
     if status_lookup:
         step("Checking Timeline status")
     attach_timeline(report, status_lookup, now)
+    step("Saving the results and hiding finished tickets")
     mark_closed(base_dir, report["closed"], now)
     # Hidden at the later of the ticket's own newest commit and your newest discovered one, so a commit that
     # discovery sees but the ticket check does not list cannot bring the ticket back on every check.

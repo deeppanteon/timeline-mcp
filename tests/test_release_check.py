@@ -903,11 +903,12 @@ class TestBranchChanges:
 
     def test_draft_adds_env_variables_with_empty_values(self, repo):
         draft = rc.draft_pr(repo, "5000", "master", "Fix", runner=pr_runner([], names=NAMES, env_diff=ENV_DIFF, entity_diffs=ENTITY_DIFFS))
-        assert draft["body"].splitlines()[-5:] == [
-            "  - Environment variables (.env.dist), set before release",
-            "    - ZENDESK_API_EMAIL=", "    - ZENDESK_API_URL=", "    - APP_LOCALE=", "    - OLD_FLAG (removed)"]
+        assert draft["body"].splitlines()[-10:] == [
+            "", "---", "", "**Before release (not part of the release note)**", "",
+            "- Environment variables (.env.dist), set before release",
+            "  - ZENDESK_API_EMAIL=", "  - ZENDESK_API_URL=", "  - APP_LOCALE=", "  - OLD_FLAG (removed)"]
         assert [e["path"] for e in draft["analysis"]["entities"]] == ["shared/src/Entity/Client/Orders.php", "shared/src/Entity/Admin/Gadget.php"]
-        assert rc.release_entry(draft["body"], "5000")["bullets"][-1] == (2, "OLD_FLAG (removed)")  # survives into the release note
+        assert "ZENDESK" not in str(rc.release_entry(draft["body"], "5000"))  # outside the release-note entry
 
     def test_draft_from_an_earlier_pr_keeps_its_reviewed_text(self, repo):
         other = {"merged": [{"number": 9, "title": "QA: 5000", "headRefName": "5000-fix", "body": "- #5000 - T\n  - Changed the report\n"}]}
@@ -929,15 +930,17 @@ class TestAiSql:
         result = self.run_ai(repo, self.SQL_OUT, calls)
         assert result["body"].splitlines() == [
             "- #5000 - Fix the thing", "  - Added the one pager type to orders",
-            "  - Environment variables (.env.dist), set before release",
-            "    - ZENDESK_API_EMAIL=", "    - ZENDESK_API_URL=", "    - APP_LOCALE=", "    - OLD_FLAG (removed)",
-            "  - SQL changes (Client DB)", "    - ALTER TABLE orders ADD one_pager_type VARCHAR(50) DEFAULT NULL",
-            "  - SQL changes (Admin DB)", "    - CREATE TABLE gadget (id INT AUTO_INCREMENT NOT NULL, PRIMARY KEY(id))"]
+            "", "---", "", "**Before release (not part of the release note)**", "",
+            "- Environment variables (.env.dist), set before release",
+            "  - ZENDESK_API_EMAIL=", "  - ZENDESK_API_URL=", "  - APP_LOCALE=", "  - OLD_FLAG (removed)",
+            "- SQL changes (Client DB)", "  - ALTER TABLE orders ADD one_pager_type VARCHAR(50) DEFAULT NULL",
+            "- SQL changes (Admin DB)", "  - CREATE TABLE gadget (id INT AUTO_INCREMENT NOT NULL, PRIMARY KEY(id))"]
         assert result["sql"] == 2 and result["warnings"] == []
         prompt = [c for c in calls if c[0].endswith("claude")][0][2]
         assert "one_pager_type" in prompt and "=== shared/src/Entity/Client/Orders.php (Client DB, changed) ===" in prompt
         assert "(Admin DB, new file)" in prompt and "OrderController" not in prompt and "ZENDESK" not in prompt  # env is read locally
-        assert rc.release_entry(result["body"], "5000")["indent_ok"] is True
+        entry = rc.release_entry(result["body"], "5000")
+        assert entry["indent_ok"] is True and entry["bullets"] == [(1, "Added the one pager type to orders")]  # nothing technical inside
 
     def test_none_and_missing_sql(self, repo):
         none = self.run_ai(repo, "- #5000 - T\n  - Did it\n---SQL---\nNONE\n")

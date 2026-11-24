@@ -131,7 +131,7 @@ const HELP = {
         ["Ticket titles and status checks", "live", "Timeline, one request per ticket when the report is built (every ticket that is not shipped, plus shipped ones with a commit in the last 90 days; never a ticket already found closed or hidden). Only its title and stage are read; if Timeline cannot be reached the page still shows the git side."],
       ],
       use: [
-        "Tickets are grouped into collapsible sections by their Timeline stage, because the stage says what to expect: In development (nothing is expected on QA or production, so missing commits are normal and not red), In QA and QA blocked (every commit should be on QA), QA approved and Live (every commit should be on production), and Timeline status not read (Timeline unreachable or does not know the ticket). A section opens by itself when something in it needs attention; your own open and close choices are kept until you reload.",
+        "The tiles on top count the tickets per Timeline stage and filter the list; Needs attention (Timeline and the code disagree, or a commit was dropped) comes first. Pick a ticket in the list (or move with the arrow keys) to see its commits on the right. Tickets are grouped by their Timeline stage, because the stage says what to expect: In development (nothing is expected on QA or production, so missing commits are normal and not red), In QA and QA blocked (every commit should be on QA), QA approved and Live (every commit should be on production), and Timeline status not read (Timeline unreachable or does not know the ticket). Live starts folded; search matches ticket number or title.",
         "Only tickets you are subscribed to in Timeline are included. A ticket you are not subscribed to is not read from git or shown, even if you committed to it; it appears again once you subscribe. If Timeline cannot be reached the check fails and the previous report stays, so an unknown subscription list never turns into everything. At least one project with an id must be set up in timeline-desk.json.",
         "A ticket belongs here when you committed code for it in the last 12 months: a branch with its number in the name, or a commit message with TL #number. Only the repositories where it has commits count, so a ticket that exists only in duell-pos is never called missing in duell-admin.",
         "The badge is the worst state of its repositories: Dropped (a commit that was on QA or production is gone, for example qa-release was reset), Not released (nothing on QA or production), Not on production (some commits reached QA, some did not, none is on production), Partly on production, On QA (all on QA, waiting for production) and Shipped.",
@@ -140,7 +140,6 @@ const HELP = {
         "Closed tickets are left out completely. The first time Timeline reports a ticket closed, the desk deletes its stored commits and remembers it, so later checks neither look it up in Timeline nor read its commits from git. This is permanent: a ticket that is reopened in Timeline does not come back by itself.",
         "The Jira chip on each ticket is its column on the Jira page's board. The pencil moves the card to another column, or adds the ticket to the board when it is not on it (a dash). It is the same control as on the Task page: the change is saved in our database and queued for the Jira bot, exactly as if you had moved the card on the Jira page, and it is only made when you pick a column.",
         "Mismatch (red) and Check (amber) lines say where Timeline and the code disagree: Timeline says live but commits are not on production; QA approved but commits not on production yet; in QA but commits not on QA; all code is on production while Timeline is not Live; or every commit is already on QA or production while Timeline is still before QA (a stage nobody updated). They only report, nothing is changed in Timeline.",
-        "Needs attention shows only tickets that are not where their section expects (or that have a Mismatch or Check line). All tickets shows everything.",
       ],
       refresh: "Rebuilt when you press Check again, when you open the page and the last check is over an hour old, and by a background check every {coverage} minutes (every {coverage_off} minutes outside the active hours) while the service runs. The history needs those regular checks to see a drop.",
       how: "Own commits of a branch are its first-parent commits without merges that the work branch (development in duell-admin, v4-release in duell-pos) does not have, plus any commit on any branch whose message names the ticket. Released means the commit is an ancestor of origin/qa-release or of the production branch (master in duell-admin, prod-release in duell-pos); a cherry-pick with another sha also counts. Merge commits from PRs and direct merges are treated alike.",
@@ -170,20 +169,6 @@ const HELP = {
         "Only a Timeline link ending in /edit/<number> or a plain number is accepted; a list link is rejected on purpose, because it would point at the wrong task.",
         "A task with no description and no comments just shows that, nothing is invented.",
       ] },
-    { key: "work", title: "Work", sources: ["git"],
-      purpose: "The task worktrees on this computer, how big they are and whether they hold unsaved work.",
-      from: [
-        ["Worktrees, their branch, size and state", "git", "git on this computer, read when the page opens. No Timeline call."],
-      ],
-      use: [
-        "State shows uncommitted changes, commits that exist only on this computer, or \"no new commits vs base\".",
-        "Remove deletes the worktree folder. Remove + branch also deletes its branch.",
-      ],
-      refresh: "No automatic refresh. Open the page or press Refresh.",
-      how: "Removal never forces: git keeps a worktree with uncommitted changes and a branch with commits that are not merged anywhere. Only folders inside a configured worktrees folder can be removed.",
-      know: [
-        "A worktree with uncommitted changes cannot be removed from here; commit or discard first.",
-      ] },
     { key: "jira", title: "Jira", sources: ["live", "db"],
       purpose: "A small board of the tasks you pick, in Jira-style columns.",
       from: [
@@ -192,7 +177,7 @@ const HELP = {
       ],
       use: [
         "Use + in a column to open the picker: your assigned tasks (and support tasks) not yet on the board. Tick tasks, then add.",
-        "Drag a card to another column to move it. Search filters the cards by title.",
+        "Drag a card to another column to move it. Ready for QA and Ready for Release have a \"PR created\" section below the cards: drag a card into it, or back up, to mark by hand that its pull request exists (a local note, not sent to Jira, cleared when the card leaves the column). Search filters the cards by title.",
       ],
       refresh: "No automatic refresh. Adding, moving and removing a card is saved immediately.",
       how: "Each change also adds a row to a queue that a Jira bot reads and marks as delivered. This page itself never talks to Jira.",

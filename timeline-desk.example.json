@@ -5,6 +5,7 @@
       "name": "duell-admin",
       "path": "../duell-admin",
       "base": "master",
+      "workspace": "branch",
       "worktrees": "../duell-admin-worktrees"
     }
   },

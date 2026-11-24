@@ -513,7 +513,7 @@ def test_attach_timeline_failure_keeps_the_git_report():
 def test_combine_gives_every_ticket_empty_timeline_fields():
     t = cov.combine({"duell-admin": {"1": {"state": "shipped"}}})["tickets"][0]
     assert (t["title"], t["timeline"], t["flags"]) == ("", None, [])
-    assert (t["section"], t["attention"]) == ("unknown", False)  # shipped, no Timeline status
+    assert t["section"] == "unknown"  # no Timeline status
 
 
 # ---- sections ----------------------------------------------------------------
@@ -537,30 +537,19 @@ def classified(code_state, release_state, task_status="open", missing_qa=0, miss
 def test_a_ticket_in_development_is_not_expected_on_qa_or_production():
     for code_state, qa, prod in (("not_released", 3, 3), ("not_on_prod", 1, 3), ("partial", 1, 2)):
         t = classified(code_state, "before qa", missing_qa=qa, missing_prod=prod)
-        assert t["section"] == "dev" and t["flags"] == [] and t["attention"] is False
+        assert t["section"] == "dev" and t["flags"] == []
 
 
 def test_code_ahead_of_a_development_stage_is_flagged():
     t = classified("on_qa", "before qa")
-    assert keys(t["flags"]) == ["stage_behind"] and t["attention"] is True and "QA, but Timeline is still before QA" in t["flags"][0]["text"]
+    assert keys(t["flags"]) == ["stage_behind"] and "QA, but Timeline is still before QA" in t["flags"][0]["text"]
     shipped = classified("shipped", "before qa")["flags"]
     assert keys(shipped) == ["stage_behind"] and "production" in shipped[0]["text"]  # not also "not Live"
     assert classified("partial", "before qa", missing_qa=1, missing_prod=1)["flags"] == []  # rework: not flagged
 
 
-def test_attention_per_section():
-    assert classified("not_released", "in qa", missing_qa=2, missing_prod=2)["attention"] is True
-    assert classified("on_qa", "in qa")["attention"] is False  # all on QA, as expected
-    assert classified("on_qa", "qa approved", missing_prod=2)["attention"] is True  # approved, not on production
-    assert classified("shipped", "live")["attention"] is False
-    assert classified("not_released", "live", missing_qa=1, missing_prod=1)["attention"] is True
-    assert classified("dropped", "before qa")["attention"] is True
-
-
-def test_attention_without_a_timeline_status_uses_the_code_state():
+def test_without_a_timeline_status_the_section_is_unknown():
     t = cov.combine({"duell-pos": {"1": {"state": "not_on_prod"}, "2": {"state": "on_qa"}, "3": {"state": "dropped"}}})["tickets"]
-    by = {x["issue"]: x for x in t}
-    assert by["1"]["attention"] is True and by["2"]["attention"] is False and by["3"]["attention"] is True
     assert all(x["section"] == "unknown" for x in t)
 
 

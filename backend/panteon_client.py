@@ -1303,6 +1303,13 @@ def _open_planner_db(base_dir: Optional[str], create: bool) -> Optional[sqlite3.
                      "last_commit_at TEXT NOT NULL, retired_at TEXT NOT NULL)")
         conn.execute("PRAGMA user_version = 13")
         conn.commit()
+    if conn.execute("PRAGMA user_version").fetchone()[0] < 14 or not conn.execute(
+            "SELECT 1 FROM pragma_table_info('jira_cards') WHERE name = 'pr_created'").fetchone():
+        # A flag on Jira cards in Ready for QA / Ready for Release: the pull request has been created (set by hand).
+        if not conn.execute("SELECT 1 FROM pragma_table_info('jira_cards') WHERE name = 'pr_created'").fetchone():
+            conn.execute("ALTER TABLE jira_cards ADD COLUMN pr_created INTEGER NOT NULL DEFAULT 0")
+        conn.execute("PRAGMA user_version = 14")
+        conn.commit()
     return conn
 
 

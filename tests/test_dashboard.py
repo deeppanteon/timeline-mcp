@@ -438,7 +438,7 @@ class TestCoverage:
         monkeypatch.setenv("PANTEON_BEARER_TOKEN", "tok")
         calls = []
         client = self.app(tmp_path, lambda **kw: calls.append(kw))
-        assert client.get("/api/coverage").json() == {"report": None, "step": None}
+        assert client.get("/api/coverage").json() == {"report": None, "step": None, "log": [], "error": None}
         assert calls == []
 
     def test_post_needs_the_header(self, monkeypatch, tmp_path):
@@ -464,7 +464,10 @@ class TestCoverage:
         assert seen["authors"] == ["a@example.com"] and seen["base_dir"] == str(tmp_path)
         assert callable(seen["status_lookup"])  # Timeline titles and flags
         assert callable(seen["subscribed"])  # only the tickets you are subscribed to
-        assert client.get("/api/coverage").json() == {"report": response.json()["report"], "step": None}
+        after = client.get("/api/coverage").json()
+        assert after["report"] == response.json()["report"] and after["step"] is None and after["error"] is None
+        assert [s["text"] for s in after["log"]] == ["Starting", "Fetching duell-admin"]  # what the Check again popup lists
+        assert not any(s["running"] for s in after["log"]) and all(s["seconds"] is not None for s in after["log"])
 
     def test_each_ticket_gets_its_timeline_link_from_its_project(self, monkeypatch, tmp_path):
         monkeypatch.setenv("PANTEON_BEARER_TOKEN", "tok")
@@ -522,3 +525,18 @@ def test_config_reads_git_authors(tmp_path):
     path.write_text(json.dumps({"git_authors": [" a@example.com ", "", "b@example.com"]}))
     assert work_session.load_config(str(path))["git_authors"] == ["a@example.com", "b@example.com"]
     assert work_session.load_config(str(tmp_path / "none.json"))["git_authors"] == []
+
+
+class TestCoverageProgress:
+    def test_a_failed_rebuild_keeps_its_steps_and_the_error(self):
+        cache = dashboard.CoverageCache()
+
+        def builder(**kw):
+            kw["progress"]("Fetching duell-admin from GitHub")
+            raise ValueError("git failed")
+
+        with pytest.raises(ValueError):
+            dashboard.run_coverage(cache, builder, {}, None)
+        assert cache.error == "git failed" and cache.step is None
+        assert [s["text"] for s in cache.steps()] == ["Starting", "Fetching duell-admin from GitHub"]
+        assert all(s["seconds"] is not None and not s["running"] for s in cache.steps())

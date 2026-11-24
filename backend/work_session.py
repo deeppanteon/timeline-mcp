@@ -1,8 +1,15 @@
 """
-Git worktrees and the terminal launch behind the dashboard's task workflows
-(workflow.py): each task gets its own git worktree of the right repo, and a
-workflow step opens an interactive Claude Code session there in a terminal
-window. Also lists and removes those worktrees.
+The task's git workspace and the terminal launch behind the dashboard's task
+workflows (workflow.py), and a workflow step opens an interactive Claude Code
+session there in a terminal window.
+
+Each repo's "workspace" setting in timeline-desk.json says where a task runs:
+- "branch" (the default): the main checkout itself, switched to the task's
+  branch (prepare_branch). Its vendor/, node_modules/, web server and IDE
+  setup all apply, and the session's work is what you see.
+- "worktree": a separate git worktree per task (prepare_worktree), for running
+  several tasks at once. Gitignored dependencies aren't there.
+Also lists and removes worktrees made in "worktree" mode.
 
 Repos come from timeline-desk.json (see timeline-desk.example.json), keyed by
 the Timeline board/list id (a planner task's `code`). A worktree's timeline/
@@ -33,6 +40,8 @@ CONFIG_NAME = "timeline-desk.json"
 # Code applies that to the repo's worktrees, so runs can't rely on the user's setup.
 MCP_NAME = "timeline-desk"
 _lock = threading.Lock()
+# Where a task runs (see the module docstring); the first is the default.
+WORKSPACES = ("branch", "worktree")
 
 Launcher = Callable[[List[str], Dict[str, str]], None]
 
@@ -48,7 +57,7 @@ def config_path() -> str:
 
 def load_config(path: Optional[str] = None) -> Dict[str, Any]:
     """
-    {"repos": {code: {"id" (API project id), "name", "path", "base", "worktrees"}}, "claude", "terminal", "me", "git_authors"}
+    {"repos": {code: {"id" (API project id), "name", "path", "base", "workspace", "worktrees"}}, "claude", "terminal", "me", "git_authors"}
     with paths made absolute (relative ones resolve against the config file).
     A missing file means no repos, so no Start buttons.
     """
@@ -68,11 +77,15 @@ def load_config(path: Optional[str] = None) -> Dict[str, Any]:
     repos = {}
     for code, repo in (raw.get("repos") or {}).items():
         repo_path = absolute(repo["path"])
+        workspace = repo.get("workspace") or "branch"
+        if workspace not in WORKSPACES:
+            raise WorkSessionError(f"Repo {code} in {path}: \"workspace\" must be one of {', '.join(WORKSPACES)}.")
         repos[str(code)] = {
             "id": repo.get("id"),
             "name": repo.get("name") or os.path.basename(repo_path),
             "path": repo_path,
             "base": repo.get("base") or "master",
+            "workspace": workspace,
             "worktrees": absolute(repo["worktrees"]) if repo.get("worktrees") else repo_path + "-worktrees",
         }
     return {
@@ -269,18 +282,7 @@ def prepare_worktree(repo: Dict[str, Any], issue_id: str, title: str, runner: Ru
     existing = find_worktree(git, issue_id)
     if existing:
         return _with_timeline(git, existing)
-    prefix = f"{issue_id}-"
-
-    git.run("fetch", "--quiet", "origin", repo["base"], timeout=120)
-    local = git.branches(f"{prefix}*")
-    remote = [b for b in git.branches(f"origin/{prefix}*", remote=True) if b.startswith("origin/")]
-    if local:
-        branch, start = local[0], None
-    elif remote:
-        branch, start = remote[0][len("origin/"):], remote[0]
-    else:
-        branch, start = branch_name(issue_id, title), f"origin/{repo['base']}"
-    git.run("check-ref-format", "--branch", branch)
+    branch, start = _task_branch(git, issue_id, title)
     path = worktree_dir(repo, issue_id)
     if os.path.exists(path):
         raise WorkSessionError(f"{path} already exists but isn't a worktree of {repo['name']}. Move it away first.")
@@ -292,6 +294,69 @@ def prepare_worktree(repo: Dict[str, Any], issue_id: str, title: str, runner: Ru
     else:
         git.run("worktree", "add", "--no-track", "-b", branch, path, start)
     return _with_timeline(git, {"path": path, "branch": branch, "created": True})
+
+
+def _task_branch(git: "_Git", issue_id: str, title: str) -> Tuple[str, Optional[str]]:
+    """
+    (branch, start) for the task: a local `<issue>-…` branch (start None), else
+    one on origin (start `origin/<it>`), else a new `<issue>-<title>` branch
+    (start `origin/<base>`). Fetches the base first.
+    """
+    prefix = f"{issue_id}-"
+    git.run("fetch", "--quiet", "origin", git.repo["base"], timeout=120)
+    local = git.branches(f"{prefix}*")
+    remote = [b for b in git.branches(f"origin/{prefix}*", remote=True) if b.startswith("origin/")]
+    if local:
+        branch, start = local[0], None
+    elif remote:
+        branch, start = remote[0][len("origin/"):], remote[0]
+    else:
+        branch, start = branch_name(issue_id, title), f"origin/{git.repo['base']}"
+    git.run("check-ref-format", "--branch", branch)
+    return branch, start
+
+
+def current_branch(repo: Dict[str, Any], runner: Runner = _subprocess_runner) -> Optional[str]:
+    """The branch the main checkout is on; None when HEAD is detached."""
+    code, out = _Git(repo, runner).run("symbolic-ref", "--quiet", "--short", "HEAD", ok_codes=(0, 1))
+    return out.strip() if code == 0 and out.strip() else None
+
+
+def prepare_branch(repo: Dict[str, Any], issue_id: str, title: str, runner: Runner = _subprocess_runner) -> Dict[str, Any]:
+    """
+    Returns {path, branch, created} with the main checkout itself on the task's
+    branch (see _task_branch): already on a `<issue>-…` branch, it stays as it
+    is; otherwise it checks the branch out. Refuses, without touching anything,
+    when the checkout has uncommitted changes to tracked files (they belong to
+    whatever it is on now), or when a worktree still holds the task's branch
+    (git can't check one branch out twice; remove that worktree first).
+    """
+    git = _Git(repo, runner)
+    if not os.path.isdir(repo["path"]):
+        raise WorkSessionError(f"No checkout at {repo['path']}. Fix the path in {CONFIG_NAME}.")
+    main = os.path.realpath(repo["path"])
+    current = current_branch(repo, runner)
+    if current and (current.startswith(f"{issue_id}-") or current == issue_id):
+        return {"path": repo["path"], "branch": current, "created": False}
+    held = next((wt for wt in git.worktrees() if os.path.realpath(wt["path"]) != main
+                 and (wt.get("branch", "").startswith(f"{issue_id}-") or wt.get("branch") == issue_id)), None)
+    if held:
+        raise WorkSessionError(
+            f"Branch {held['branch']} is still checked out in the worktree {held['path']}. Commit there, then remove "
+            "that worktree on the Work tab (the branch stays) and start again: the task now runs in the main checkout.")
+    _, dirty = git.run("status", "--porcelain", "--untracked-files=no")
+    if dirty.strip():
+        raise WorkSessionError(
+            f"The main checkout {repo['path']} has uncommitted changes on {current or 'a detached HEAD'}. "
+            "Commit or stash them, then start again.")
+    branch, start = _task_branch(git, issue_id, title)
+    if start is None:
+        git.run("checkout", "--quiet", branch)
+    elif start != f"origin/{repo['base']}":
+        git.run("checkout", "--quiet", "--track", "-b", branch, start)
+    else:
+        git.run("checkout", "--quiet", "--no-track", "-b", branch, start)
+    return {"path": repo["path"], "branch": branch, "created": start is not None}
 
 
 def _popen_launcher(args: List[str], env: Dict[str, str]) -> None:
@@ -311,7 +376,7 @@ def terminal_command(config: Dict[str, Any], path: str, title: str, claude_args:
     """
     script = ('cd "$1" || { echo "No folder $1"; exec bash; }; exit_file="$2"; shift 2; "$@"; code=$?; '
               'if [ -n "$exit_file" ]; then mkdir -p "$(dirname "$exit_file")" && echo "$code" > "$exit_file"; fi; '
-              'echo; echo "Claude exited. This shell is in the task worktree."; exec bash')
+              'echo; echo "Claude exited. This shell is in the task'"'"'s checkout."; exec bash')
     return [config["terminal"], f"--title={title}", f"--working-directory={path}", "--",
             "bash", "-c", script, "bash", path, exit_file or "", config["claude"], *claude_args]
 
@@ -365,87 +430,16 @@ def launch_env(config: Dict[str, Any]) -> Dict[str, str]:
 
 def worktree_for(config: Dict[str, Any], code: str, issue_id: str, title: str,
                  runner: Runner = _subprocess_runner) -> Dict[str, Any]:
-    """The task's worktree on board `code`'s repo (see prepare_worktree), under the lock."""
+    """
+    Where the task runs on board `code`'s repo, under the lock: the main checkout
+    on its branch (prepare_branch) or its own worktree (prepare_worktree), per
+    the repo's "workspace". The result's `workspace` says which.
+    """
     if not re.fullmatch(r"\d{1,7}", str(issue_id)):
         raise ValueError("Issue ID must be a number.")
     repo = config["repos"].get(str(code))
     if not repo:
         raise ValueError(f"Board {code} has no repo. Add it to {CONFIG_NAME}.")
     with _lock:
-        return {**prepare_worktree(repo, str(issue_id), title, runner), "repo": repo["name"]}
-
-
-# ---- listing and removal ---------------------------------------------------
-def _dir_size(path: str) -> int:
-    total = 0
-    for root, dirs, files in os.walk(path):
-        dirs[:] = [d for d in dirs if d != ".git"]
-        for name in files:
-            try:
-                total += os.lstat(os.path.join(root, name)).st_size
-            except OSError:
-                pass
-    return total
-
-
-def list_worktrees(config: Dict[str, Any], runner: Runner = _subprocess_runner) -> List[Dict[str, Any]]:
-    """Task worktrees (those inside each repo's worktrees folder), with cleanup facts."""
-    items = []
-    for code, repo in config["repos"].items():
-        if not os.path.isdir(repo["path"]):
-            continue
-        git = _Git(repo, runner)
-        for wt in git.worktrees():
-            if not _inside(wt["path"], repo["worktrees"]):
-                continue
-            path, branch = wt["path"], wt.get("branch")
-            exists = os.path.isdir(path)
-            dirty = unpushed = None
-            merged = False
-            if exists:
-                _, status = git.run("status", "--porcelain", cwd=path)
-                dirty = len(status.splitlines())
-                _, out = git.run("rev-list", "--count", "HEAD", "--not", "--remotes", cwd=path)
-                unpushed = int(out.strip() or 0)
-                code_rc, _ = git.run("merge-base", "--is-ancestor", "HEAD", f"origin/{repo['base']}", cwd=path, ok_codes=(0, 1))
-                merged = code_rc == 0
-            m = re.match(r"(\d+)-", branch or "") or re.fullmatch(rf"{re.escape(repo['name'])}-(\d+)", os.path.basename(path))
-            items.append({
-                "repo": repo["name"], "code": code, "path": path, "branch": branch,
-                "issue_id": m.group(1) if m else None,
-                "exists": exists, "size": _dir_size(path) if exists else 0,
-                "dirty": dirty, "unpushed": unpushed, "merged": merged,
-            })
-    return items
-
-
-def remove_worktree(
-    config: Dict[str, Any],
-    path: str,
-    delete_branch: bool = False,
-    runner: Runner = _subprocess_runner,
-) -> Dict[str, Any]:
-    """
-    `git worktree remove` (refuses with uncommitted changes) and optionally
-    `git branch -d` (refuses unmerged commits). Never forces.
-    """
-    for repo in config["repos"].values():
-        if not _inside(path, repo["worktrees"]):
-            continue
-        git = _Git(repo, runner)
-        match = next((wt for wt in git.worktrees() if os.path.realpath(wt["path"]) == os.path.realpath(path)), None)
-        if not match:
-            break
-        with _lock:
-            if os.path.isdir(path):
-                git.run("worktree", "remove", path)
-            else:
-                git.run("worktree", "prune")
-            result = {"removed": path, "branch": match.get("branch"), "branch_deleted": False}
-            if delete_branch and match.get("branch"):
-                code, out, err = runner(("git", "branch", "-d", match["branch"]), repo["path"], 30)
-                result["branch_deleted"] = code == 0
-                if code != 0:
-                    result["branch_note"] = "Kept the branch: it has commits not merged anywhere yet."
-        return result
-    raise ValueError("Not a task worktree from this dashboard.")
+        prepare = prepare_worktree if repo.get("workspace") == "worktree" else prepare_branch
+        return {**prepare(repo, str(issue_id), title, runner), "repo": repo["name"], "workspace": repo.get("workspace") or "branch"}

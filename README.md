@@ -147,7 +147,7 @@ Everything is per person: your own token, your own planner, your own paths. Noth
 | Extra | Needs |
 |---|---|
 | Release view, `release-pr-check` skill | A duell-admin checkout at `../duell-admin` (or `DUELL_ADMIN_DIR`), and `gh auth login` with access to Panteon-norway |
-| Claude buttons, Work tab | `cp timeline-desk.example.json timeline-desk.json`, set `claude` to the output of `which claude` (an nvm path changes when Node is upgraded). Linux with `gnome-terminal` only for now |
+| Claude buttons | `cp timeline-desk.example.json timeline-desk.json`, set `claude` to the output of `which claude` (an nvm path changes when Node is upgraded). Linux with `gnome-terminal` only for now |
 | Always-on service | Linux with systemd: `scripts/dashboard-service.sh install` |
 
 **Not in the repo** — set these up yourself if you want them:
@@ -257,11 +257,11 @@ Intake → Estimate (optional) → Develop (one step per run) → Self-review �
 |---|---|---|
 | Intake | `timeline-intake` | `timeline/<id>/task.md`, `analysis.md`, `progress.md` |
 | Estimate | `timeline-estimate` | `analysis.md` Time Analysis |
-| Develop | `timeline-progress` work, phase dev (it hands the edit to the specialist skill) | code, one `progress.md` row and one local commit per run |
+| Develop | `timeline-progress` work, phase dev (it hands the edit to the specialist skill) | code, one `progress.md` row per run, left uncommitted until you confirm a commit in the terminal |
 | Self-review | `upgrade-verification` | `review.md` |
 | Release to QA | `timeline-release` qa | `release-note.md` section, `qa-plan.md` |
 | Waiting on QA | (your decision: QA found issues / QA approved) | — |
-| Fix QA findings | `timeline-progress` work, phase qa-fix | the fix, one `progress.md` row and one local commit per finding |
+| Fix QA findings | `timeline-progress` work, phase qa-fix | the fix, one `progress.md` row per finding, left uncommitted until you confirm a commit in the terminal |
 | Release to prod | `timeline-release` prod | `release-note.md` section |
 | Close | (your decision) | — |
 
@@ -282,7 +282,8 @@ More on the same page (see `docs/workflow-roadmap.md` §10 for details):
 - **QA findings.** Each QA comment becomes a finding you mark Bug / Question / Not a bug / Won't fix (or add one in your own words). Fix QA findings fixes one Bug per run, pointing Claude at the comment by its id; a Question can get a drafted reply. A closed workflow can start a **prod fix** (Fix live bug → Release hotfix).
 - **Everything runs in a terminal.** Every step opens an interactive Claude Code session in the task's worktree, with Claude's normal permission prompts; nothing runs in the background. The run card shows what the terminal is doing right now (working, running a tool, waiting for you, asking a question) from Claude's session log, and refreshes every 5 seconds; the badges show when it needs you.
 
-- The worktree reuses an existing `<id>-…` branch (local or on GitHub), else creates `<id>-<full-title-slug>` from `origin/<base>` (the whole task title, not shortened). Worktrees go to `<repo>-worktrees/<repo>-<id>` (e.g. `duell-admin-worktrees/duell-admin-5145`), named by the task ID only; one costs about 75 MB for duell-admin (git history is shared; dependencies aren't installed there).
+- **Where a task runs** is set per repo by `"workspace"` in `timeline-desk.json`. `"branch"` (the default) runs every step in the main checkout, switched to the task's branch: its `vendor/`, `node_modules/`, web server and IDE all apply. It refuses to switch while the checkout has uncommitted changes to tracked files, while another task's run is still open there (one branch at a time), or while an old worktree still holds the task's branch (remove it with `git worktree remove`; the branch stays). `"worktree"` gives each task its own folder instead (below), for running tasks side by side.
+- The branch (in either mode) reuses an existing `<id>-…` branch (local or on GitHub), else creates `<id>-<full-title-slug>` from `origin/<base>` (the whole task title, not shortened). Worktrees go to `<repo>-worktrees/<repo>-<id>` (e.g. `duell-admin-worktrees/duell-admin-5145`), named by the task ID only; one costs about 75 MB for duell-admin (git history is shared; dependencies aren't installed there).
 - The worktree's `timeline/` is a symlink to the main checkout's `timeline/`, so task docs are shared between sessions and survive removing the worktree. A real `timeline/` folder in an older worktree is merged into the main checkout the next time the workflow uses it (identical files dropped, differing ones left in place with a note). `/timeline` goes into the repo's `.git/info/exclude` when needed, because a `timeline/` gitignore line doesn't match a symlink.
 - Set up boards once: `cp timeline-desk.example.json timeline-desk.json` and edit it (board/list id → repo path and base branch, the `claude` binary, the terminal; `gnome-terminal` by default). It's gitignored and re-read on every request. A board without a repo shows no workflow badge, and its tasks can't start one. If you installed `claude` with nvm, update the path after a Node upgrade.
 - Clean up on the **Work** tab. Removal never forces: git keeps a worktree with uncommitted changes, and `git branch -d` keeps a branch with commits that aren't merged anywhere.

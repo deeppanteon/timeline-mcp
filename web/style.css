@@ -2,14 +2,13 @@
    Signature: the six-segment stage rail on every task. */
 
 :root {
-  /* Own identity: mid-tone slate with a blue accent, so it is never mistaken
-     for Panteon Timeline itself (light, green). */
-  --bg: #414a5c;
-  --surface: #4c566a;
-  --surface-2: #576278;
-  --ink: #f6f8fb;
-  --muted: #cbd2df;
-  --line: #6a758c;
+  /* Night: gray stone. Day: white and black (see [data-theme="light"]). */
+  --bg: #3a3b3e;
+  --surface: #46474b;
+  --surface-2: #525358;
+  --ink: #ffffff;
+  --muted: #cfd0d3;
+  --line: #66676c;
   --accent: #4da3ff;
   --accent-strong: #75b8ff;
   --accent-ink: #a9d2ff;
@@ -17,12 +16,54 @@
   --done: #4fd69c;
   --progress: #f5b83d;
   --blocked: #f0675a;
-  --skipped: #99a4ba;
+  --skipped: #9d9ea3;
+  --violet: #c4a5ff;
+  --violet-fill: #b48cff;
+  --violet-ink: #d6c0ff;
+  --src-db: #6cb6ff;
+  --src-cache: #b794f6;
+  --repo-name: hsl(50 95% 72%);
+  --sha: #d9dee7;
+  --sc-text-l: 72%;
+  --sc-text-l2: 78%;
+  --scrim: var(--scrim);
+  --toast-ink: #07203d;
   --font: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
   --mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
   --radius: 8px;
   --shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 4px 14px rgba(0, 0, 0, 0.18);
   color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #f5f5f5;
+  --surface-2: #ebebeb;
+  --ink: #0a0a0a;
+  --muted: #555555;
+  --line: #d2d2d2;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.10);
+  --accent: #0b66d6;
+  --accent-strong: #0a58bd;
+  --accent-ink: #0a58bd;
+  --on-accent: #ffffff;
+  --done: #11805a;
+  --progress: #a86400;
+  --blocked: #cf3a2c;
+  --skipped: #777777;
+  --violet: #6d3fd1;
+  --violet-fill: #7a4fe0;
+  --violet-ink: #5b2fb8;
+  --src-db: #0b66d6;
+  --src-cache: #7a3fd6;
+  --repo-name: #8a6400;
+  --sha: #333333;
+  --sc-text-l: 30%;
+  --sc-text-l2: 26%;
+  --scrim: rgb(0 0 0 / 0.35);
+  --toast-ink: #ffffff;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 4px 14px rgba(0, 0, 0, 0.08);
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; }
@@ -112,6 +153,7 @@ main { width: 100%; padding: 24px 28px 48px; outline: none; }
 
 /* The task ID is the main handle on everything: bigger, bold, accent-coloured. */
 .issue { font-family: var(--mono); font-size: 16px; font-weight: 800; letter-spacing: 0.01em; color: var(--accent-ink); white-space: nowrap; }
+a.issue { text-decoration: none; }
 a.issue:hover { color: var(--ink); }
 
 .badge {
@@ -126,7 +168,7 @@ a.issue:hover { color: var(--ink); }
 
 .badge.overdue { color: var(--blocked); }
 .badge.soon { color: var(--progress); }
-.badge.support { color: var(--accent-ink); }
+.badge.support { color: var(--progress); }
 
 .note { color: var(--muted); }
 .error {
@@ -359,9 +401,9 @@ pre.pr-body { font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap
 .pr-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0 0 4px; font-size: 13px; color: var(--muted); }
 .pr-legend span { display: inline-flex; align-items: center; gap: 4px; }
 .pr-ico { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 18px; height: 18px; border-radius: 50%; font: 700 11px/1 var(--font); border: 1.5px solid var(--muted); color: var(--muted); }
-.pr-ico.ok { color: var(--on-accent, #fff); background: var(--done); border-color: var(--done); }
+.pr-ico.ok { color: var(--on-accent); background: var(--done); border-color: var(--done); }
 .pr-ico.warn { color: var(--progress); border-color: var(--progress); }
-.pr-ico.missing { color: var(--on-accent, #fff); background: var(--blocked); border-color: var(--blocked); }
+.pr-ico.missing { color: var(--on-accent); background: var(--blocked); border-color: var(--blocked); }
 .pr-rows { list-style: none; margin: 0; padding: 0; }
 .pr-row { padding: 12px 0; border-top: 1px solid var(--line); }
 .pr-ticket { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
@@ -374,10 +416,14 @@ pre.pr-body { font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap
 .pr-cell.none, .pr-cell.unknown { border-style: dashed; background: transparent; color: var(--muted); }
 .pr-cell-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
 .pr-cell-head strong { flex: none; font-size: 13px; white-space: nowrap; }
-.pr-branch { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); color: var(--muted); }
+.pr-branch { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--muted); }
+.pr-branch-label { flex: none; }
+.pr-branch .br-chip { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Branch names are plain chips, one colour for every branch. */
+.br-chip { display: inline-block; max-width: 100%; padding: 2px 9px; font: 12px var(--mono); color: var(--ink); white-space: nowrap; background: color-mix(in srgb, var(--ink) 13%, transparent); border-radius: 999px; }
 .pr-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .pr-line, .pr-cell-note { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; }
-.pr-base { font: 12px var(--mono); color: var(--muted); white-space: nowrap; }
+.pr-base { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); white-space: nowrap; }
 .pr-line-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .pr-line.missing .pr-line-text { color: var(--blocked); font-weight: 600; }
 .pr-line .btn.small { flex: none; }
@@ -388,11 +434,33 @@ pre.pr-body { font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap
 .pr-box .pr-row { border-top: 0; padding: 0; }
 .pr-box .pr-ticket { display: none; }
 @media (max-width: 760px) { .pr-cells { grid-template-columns: 1fr; } }
-.pr-dialog { width: min(640px, calc(100vw - 32px)); }
+dialog.tl-dialog.pr-dialog { width: min(1500px, calc(100vw - 32px)); max-width: none; height: calc(100vh - 32px); max-height: none; overflow: hidden; overscroll-behavior: contain; }
+dialog.pr-dialog form { display: flex; flex-direction: column; height: 100%; box-sizing: border-box; }
+.pr-grid { display: grid; grid-template-columns: minmax(300px, 3fr) minmax(0, 7fr); gap: 24px; margin-top: 6px; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.pr-side, .pr-main { min-width: 0; }
+.pr-main { display: flex; flex-direction: column; }
+.pr-desc-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; min-height: 28px; margin-top: 10px; }
+.pr-desc-head .btn { flex: none; white-space: nowrap; }
+.pr-desc-head label { margin: 0 0 4px; }
+.pr-main textarea { flex: 1; min-height: 200px; line-height: 1.5; overscroll-behavior: contain; }
+.pr-ai-note { margin: 8px 0 0; font-size: 12.5px; }
+.pr-dialog footer { padding-top: 12px; border-top: 1px solid var(--line); }
+.pr-findings h3 { margin: 0 0 6px; font-size: 13px; }
+.pr-vars p { margin: 2px 0 6px; }
+.pr-var-list { display: flex; flex-wrap: wrap; gap: 5px; }
+.pr-var { padding: 1px 7px; font: 11.5px var(--mono); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 999px; }
+@media (max-width: 860px) { .pr-grid { grid-template-columns: 1fr; } .pr-main textarea { min-height: 220px; } }
 .pr-dialog label { display: block; margin-top: 10px; font-size: 13px; color: var(--muted); }
 .pr-dialog input, .pr-dialog select, .pr-dialog textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 4px; font: 14px var(--font); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 8px; }
-.pr-ai { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
-.pr-findings { margin-top: 8px; padding: 8px 10px; font-size: 13px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); }
+.pr-route { display: flex; align-items: flex-end; gap: 10px; margin-top: 10px; }
+.pr-route-from { flex: 1 1 0; min-width: 0; }
+.pr-route label { margin: 0 0 4px; }
+.pr-route select { width: 100%; max-width: none; height: 34px; margin-top: 0; font: 13px var(--mono); }
+.pr-route-arrow, .pr-route-to .br-chip { display: flex; align-items: center; height: 34px; box-sizing: border-box; }
+.pr-route-arrow { flex: none; color: var(--muted); }
+.pr-route-to { flex: none; display: flex; flex-direction: column; align-items: flex-start; }
+@media (max-width: 620px) { .pr-route { flex-direction: column; align-items: stretch; } .pr-route-arrow { display: none; } }
+.pr-findings { margin-top: 14px; padding: 8px 10px; font-size: 13px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); }
 .pr-findings p { margin: 2px 0; }
 .pr-dialog textarea { font-family: var(--mono); font-size: 12.5px; resize: vertical; }
 
@@ -478,10 +546,10 @@ pre.pr-body { font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap
 .toasts { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 100; display: flex; flex-direction: column; align-items: center; gap: 8px; width: max-content; max-width: calc(100vw - 32px); pointer-events: none; }
 .toast {
   max-width: 560px; padding: 11px 20px; border-radius: 999px; font-size: 14px; font-weight: 600; text-align: center; pointer-events: auto;
-  background: var(--accent); color: #07203d; border: 1px solid var(--accent-strong); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45), 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
+  background: var(--accent); color: var(--toast-ink); border: 1px solid var(--accent-strong); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45), 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
   animation: toast-in 0.18s ease-out;
 }
-.toast.bad { background: var(--blocked); color: #fff; border-color: var(--blocked); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45), 0 0 0 3px color-mix(in srgb, var(--blocked) 30%, transparent); }
+.toast.bad { background: var(--blocked); color: var(--on-accent); border-color: var(--blocked); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45), 0 0 0 3px color-mix(in srgb, var(--blocked) 30%, transparent); }
 @keyframes toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
 table.work { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--surface); border: 1px solid var(--line); }
@@ -621,7 +689,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 0.85; 
 .tl-kind.comment[aria-pressed="true"] svg { color: var(--accent); }
 .tl-kind.status[aria-pressed="true"] svg { color: var(--done); }
 .tl-kind.field[aria-pressed="true"] svg { color: var(--progress); }
-.tl-kind.commit[aria-pressed="true"] svg { color: #c4a5ff; }
+.tl-kind.commit[aria-pressed="true"] svg { color: var(--violet); }
 .tl-search { flex: 1 1 260px; min-width: 200px; max-width: 420px; font: inherit; padding: 8px 14px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; }
 .tl-search::placeholder { color: var(--muted); }
 
@@ -638,7 +706,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 0.85; 
 .tl-chips:has([aria-pressed="true"]) .tl-chip:not(:has([aria-pressed="true"])) { opacity: 0.55; }
 .tl-chips:has([aria-pressed="true"]) .tl-chip:not(:has([aria-pressed="true"])):hover { opacity: 1; }
 .tl-dialog { width: min(520px, calc(100vw - 32px)); padding: 20px 22px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
-.tl-dialog::backdrop { background: rgb(0 0 0 / 0.55); }
+.tl-dialog::backdrop { background: var(--scrim); }
 .tl-dialog header { display: flex; align-items: center; justify-content: space-between; }
 .tl-dialog h2 { margin: 0; font-size: 18px; }
 .tl-dialog-x { border: 0; background: transparent; color: var(--muted); font-size: 22px; line-height: 1; cursor: pointer; }
@@ -646,6 +714,16 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 0.85; 
 .tl-dialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 /* confirmDialog / askDialog: the form fills the dialog, so a click on the dialog itself is the backdrop */
 .tl-modal { padding: 0; }
+.cov-progress { width: min(560px, calc(100vw - 32px)); }
+.cov-progress-body { padding: 20px 22px; }
+.cov-steps { list-style: none; margin: 12px 0 0; padding: 0; max-height: 50vh; overflow-y: auto; }
+.cov-steps li { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.cov-steps li:last-child { border-bottom: 0; }
+.cov-step-mark { color: var(--done); font-weight: 700; text-align: center; }
+.cov-steps li.failed .cov-step-mark { color: var(--blocked); }
+.cov-steps li.running .cov-step-text { font-weight: 600; }
+.cov-step-time { font: 12px var(--mono); color: var(--muted); }
+.cov-progress footer { justify-content: space-between; align-items: center; }
 .tl-modal form { padding: 20px 22px; }
 .tl-modal header { gap: 12px; align-items: flex-start; }
 .tl-modal h2 { line-height: 1.35; overflow-wrap: anywhere; }
@@ -678,7 +756,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 0.85; 
 .tl-event.comment .tl-node { color: var(--accent); border-color: var(--accent); }
 .tl-event.status .tl-node { color: var(--done); border-color: var(--done); }
 .tl-event.field .tl-node { color: var(--progress); border-color: var(--progress); }
-.tl-event.commit .tl-node { color: #c4a5ff; border-color: #c4a5ff; }
+.tl-event.commit .tl-node { color: var(--violet); border-color: var(--violet); }
 .tl-event.compact .tl-node { width: 26px; height: 26px; left: calc(var(--when) + 17px); top: 8px; border-width: 1.5px; }
 
 .tl-card { padding: 12px 16px; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid hsl(var(--hue) 75% 68%); border-radius: var(--radius); box-shadow: var(--shadow); transition: border-color 0.12s, transform 0.12s; }
@@ -718,8 +796,8 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 0.85; 
 .tl-more:hover { text-decoration: underline; }
 
 .tl-commit { display: flex; align-items: baseline; gap: 10px; margin-top: 6px; min-width: 0; }
-.tl-sha { font: 600 12px var(--mono); padding: 1px 7px; border-radius: 4px; background: var(--bg); border: 1px solid var(--line); color: #c4a5ff; }
-a:hover > .tl-sha { border-color: #c4a5ff; }
+.tl-sha { font: 600 12px var(--mono); padding: 1px 7px; border-radius: 4px; background: var(--bg); border: 1px solid var(--line); color: var(--violet); }
+a:hover > .tl-sha { border-color: var(--violet); }
 .tl-commit-msg { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 
 .tl-footer { display: flex; justify-content: center; padding: 18px 0 8px var(--pad); }
@@ -798,8 +876,8 @@ a:hover > .tl-sha { border-color: #c4a5ff; }
 /* ---- reset ------------------------------------------------------------------- */
 .wf-reset { border-color: var(--blocked); }
 .wf-reset ul { margin: 4px 0 8px; padding-left: 18px; }
-.btn.danger { background: var(--blocked); border-color: var(--blocked); color: #fff; }
-.btn.danger:hover { background: #ff7b6f; border-color: #ff7b6f; }
+.btn.danger { background: var(--blocked); border-color: var(--blocked); color: var(--on-accent); }
+.btn.danger:hover { background: color-mix(in srgb, var(--blocked) 80%, white); border-color: color-mix(in srgb, var(--blocked) 80%, white); }
 .wf-reset input[type="text"] { width: 110px; padding: 6px 10px; background: var(--bg); color: var(--ink);
   border: 1px solid var(--line); border-radius: var(--radius); font: inherit; }
 
@@ -855,7 +933,7 @@ a:hover > .tl-sha { border-color: #c4a5ff; }
 .jira-add { flex: none; width: 24px; height: 24px; padding: 0; border-radius: 6px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font: 600 16px/1 var(--font); cursor: pointer; }
 .jira-add:hover { border-color: var(--accent); color: var(--accent-ink); }
 .jira-picker { width: min(520px, calc(100vw - 32px)); max-height: 80vh; padding: 16px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
-.jira-picker::backdrop { background: rgba(10, 16, 30, 0.6); }
+.jira-picker::backdrop { background: var(--scrim); }
 .jira-picker[open] { display: flex; flex-direction: column; gap: 10px; }
 .jira-pick-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .jira-pick-head h2 { margin: 0; font-size: 16px; }
@@ -882,11 +960,11 @@ a:hover > .tl-sha { border-color: #c4a5ff; }
 .jira-pick.selected::before { content: "✓ "; color: var(--accent-ink); font-weight: 700; }
 .jira-pick-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-top: 4px; }
 /* Support tasks keep the normal look and only carry a "support" tag. */
-.jira-card .badge.support, .jira-pick .badge.support { color: var(--progress); border-color: var(--progress); margin-left: 8px; }
+.jira-card .badge.support, .jira-pick .badge.support { margin-left: 8px; }
 .jira-card .head .badge.support { margin-left: 0; }
 .jira-pick-section { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
-.trow .badge.support { margin-left: 8px; color: var(--progress); border-color: var(--progress); }
-.tl-task .badge.support, .tl-taskline .badge.support, .tl-chip .badge.support, .tl-watch-task .badge.support { flex: none; color: var(--progress); border-color: var(--progress); font-weight: 600; }
+.trow .badge.support { margin-left: 8px; }
+.tl-task .badge.support, .tl-taskline .badge.support, .tl-chip .badge.support, .tl-watch-task .badge.support { flex: none; font-weight: 600; }
 .tl-chip-main .badge.support { margin-right: 2px; }
 /* The "tasks watched" tile lists every watched task on hover or focus. */
 .tl-tile.has-hover { position: relative; cursor: default; }
@@ -894,7 +972,7 @@ a:hover > .tl-sha { border-color: #c4a5ff; }
 .tl-tile.has-hover:hover .tl-hover-list, .tl-tile.has-hover:focus-within .tl-hover-list, .tl-tile.has-hover:focus .tl-hover-list { display: block; }
 .tl-hover-list li { padding: 4px 8px; font-size: 13px; line-height: 1.4; color: var(--ink); white-space: nowrap; }
 .tl-hover-list strong { font-family: var(--mono); color: var(--accent-strong); }
-.tl-hover-list .badge.support { margin-left: 8px; align-self: auto; font-size: 11px; letter-spacing: 0; text-transform: none; color: var(--progress); border-color: var(--progress); }
+.tl-hover-list .badge.support { margin-left: 8px; align-self: auto; font-size: 11px; letter-spacing: 0; text-transform: none; }
 
 /* ---- open in Timeline: the button next to a task title ----------------------- */
 .open-tl { display: inline-block; margin-left: 6px; padding: 0 5px; border: 1px solid var(--line); border-radius: 5px; color: var(--accent-ink); font: 700 12px/18px var(--font); text-decoration: none; cursor: pointer; vertical-align: baseline; white-space: nowrap; }
@@ -924,11 +1002,11 @@ a:hover > .tl-sha { border-color: #c4a5ff; }
 .sources { display: inline-flex; align-items: center; gap: 4px; margin-left: 7px; vertical-align: middle; }
 .src { display: inline-flex; line-height: 0; cursor: help; }
 .src.live { color: var(--done); }
-.src.db { color: #6cb6ff; }
+.src.db { color: var(--src-db); }
 .src.git { color: var(--progress); }
 .list-title .sources { margin-left: 0; }
 
-.src.cache { color: #b794f6; }
+.src.cache { color: var(--src-cache); }
 .help-toc { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 18px; }
 .help-toc a { padding: 4px 11px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); text-decoration: none; font-size: 13px; }
 .help-toc a:hover { border-color: var(--accent); }
@@ -973,7 +1051,7 @@ a:hover > .tl-sha { border-color: #c4a5ff; }
 .jira-task { padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; font-size: 13px; cursor: grab; overflow-wrap: anywhere; }
 .jira-task.dragging { opacity: 0.45; cursor: grabbing; }
 .jira-task a.issue { text-decoration: none; font-weight: 600; }
-.jira-task .badge.support { color: var(--progress); border-color: var(--progress); margin-left: 6px; }
+.jira-task .badge.support { margin-left: 6px; }
 .jira-layout .jira-board { grid-template-columns: repeat(var(--cols, 8), minmax(96px, 1fr)); }
 .jira-layout .jira-card { padding: 8px; }
 .jira-layout .jira-card .head { justify-content: space-between; }
@@ -1008,17 +1086,17 @@ a:hover > .tl-sha { border-color: #c4a5ff; }
 @media (prefers-reduced-motion: reduce) { .tl-event.tl-live .tl-card { animation: none; } }
 
 /* My tasks on the board: one colour per status section */
-.jira-task-sec { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; padding: 2px 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: hsl(var(--sc) 70% 68%); border-bottom: 1px solid hsl(var(--sc) 50% 50% / 0.5); }
+.jira-task-sec { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; padding: 2px 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: hsl(var(--sc) 70% var(--sc-text-l)); border-bottom: 1px solid hsl(var(--sc) 50% 50% / 0.5); }
 .jira-task-sec:first-child { margin-top: 0; }
 .jira-task-sec.hl-sec { background: hsl(var(--sc) 60% 50% / 0.18); }
 .jira-task[style*="--sc"] { border-left: 3px solid hsl(var(--sc) 65% 58%); }
-.jira-task[style*="--sc"] .pill.status { color: hsl(var(--sc) 70% 72%); border-color: hsl(var(--sc) 55% 55%); background: hsl(var(--sc) 60% 50% / 0.14); }
+.jira-task[style*="--sc"] .pill.status { color: hsl(var(--sc) 70% var(--sc-text-l)); border-color: hsl(var(--sc) 55% 55%); background: hsl(var(--sc) 60% 50% / 0.14); }
 
 /* highlight in the status colour */
 .jira-task.hl, .jira-card.hl { border-color: hsl(var(--sc) 70% 62%); background: hsl(var(--sc) 60% 50% / 0.26); box-shadow: 0 0 0 1px hsl(var(--sc) 70% 62%); }
 .jira-task.hl-sec { border-color: hsl(var(--sc) 55% 55% / 0.7); background: hsl(var(--sc) 60% 50% / 0.14); }
 .jira-task.hl-sec.hl { background: hsl(var(--sc) 60% 50% / 0.3); }
-.jira-task-sec.hl-sec { background: hsl(var(--sc) 60% 50% / 0.32); color: hsl(var(--sc) 80% 78%); border-bottom-color: hsl(var(--sc) 70% 62%); box-shadow: 0 0 0 1px hsl(var(--sc) 70% 62%); border-radius: 4px; }
+.jira-task-sec.hl-sec { background: hsl(var(--sc) 60% 50% / 0.32); color: hsl(var(--sc) 80% var(--sc-text-l2)); border-bottom-color: hsl(var(--sc) 70% 62%); box-shadow: 0 0 0 1px hsl(var(--sc) 70% 62%); border-radius: 4px; }
 /* section title and its border share one colour (also while highlighted) */
 .jira-task-sec { --sc-color: hsl(var(--sc) 70% 64%); color: var(--sc-color); border: 1px solid var(--sc-color); border-radius: 4px; padding: 3px 8px; }
 .jira-task-sec.hl-sec { color: var(--sc-color); border-color: var(--sc-color); box-shadow: 0 0 0 1px var(--sc-color); }
@@ -1074,23 +1152,22 @@ a.trow:hover .jira-addchip, .jira-addchip:focus-visible { border: 1px dashed var
   .list-tools select, .list-tools .btn { flex: none; }
 }
 .list-section { margin: 22px 0 10px; padding: 8px 12px; font-size: 14px; font-weight: 600; letter-spacing: .02em;
-  color: var(--ink); background: color-mix(in srgb, #b48cff 24%, transparent); border-left: 4px solid #b48cff; border-radius: 6px; }
-.tgroup.other > summary { background: color-mix(in srgb, #b48cff 24%, transparent); border-left: 4px solid #b48cff; }
-.tgroup.other > summary::before { color: #d6c0ff; }
+  color: var(--ink); background: color-mix(in srgb, var(--violet-fill) 24%, transparent); border-left: 4px solid var(--violet-fill); border-radius: 6px; }
+.tgroup.other > summary { background: color-mix(in srgb, var(--violet-fill) 24%, transparent); border-left: 4px solid var(--violet-fill); }
+.tgroup.other > summary::before { color: var(--violet-ink); }
 /* support tag on board cards: a small "S" pill in the support colour, next to the ↗ */
 .jira-layout .jira-card .head .badge.s-pill { font-size: 11px; font-weight: 700; padding: 0 6px; margin-left: auto; }
 .jira-layout .jira-card .head .badge.s-pill + a.ext { margin-left: 0; }
 .jira-task .badge.closed { color: var(--blocked); border-color: var(--blocked); }
 
 /* Release coverage: one card per ticket, a commit table per repository. */
-.cov-card { margin-bottom: 14px; border: 0; }
+.cov-card { margin-bottom: 14px; }
 .cov-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin-bottom: 6px; }
 .cov-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* One panel per repository: header with chips, a progress bar, and a table whose columns are the same everywhere. */
 .cov-repo { margin-top: 12px; padding: 10px 12px 8px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); }
 .cov-repo-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .cov-repo-head h4 { margin: 0; font-size: 15px; }
-.cov-branch { font-weight: 400; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .cov-chips { margin-left: auto; display: inline-flex; gap: 6px; flex-wrap: wrap; }
 .cov-chip { display: inline-flex; gap: 6px; align-items: baseline; padding: 1px 9px; border-radius: 999px; border: 1px solid currentColor; font-size: 12px; background: var(--surface); }
 .cov-chip strong { font-family: var(--mono); }
@@ -1111,7 +1188,7 @@ a.trow:hover .jira-addchip, .jira-addchip:focus-visible { border: 1px dashed var
 .cov-commits tr.missing td:first-child { box-shadow: inset 3px 0 0 var(--blocked); }
 .cov-commits tr.dropped td { background: rgba(240, 103, 90, 0.14); }
 .cov-commits tr.cov-released td { color: var(--muted); }
-.cov-sha { font-family: var(--mono); font-weight: 600; color: #d9dee7; text-decoration: none; border-bottom: 1px dotted currentColor; }  /* white-grey: the git link */
+.cov-sha { font-family: var(--mono); font-weight: 600; color: var(--sha); text-decoration: none; border-bottom: 1px dotted currentColor; }  /* white-grey: the git link */
 .cov-sha::after { content: " \2197"; font-size: 10px; opacity: 0.7; }
 .cov-sha:hover { color: var(--ink); }
 .cov-pill { display: inline-block; min-width: 62px; padding: 0 8px; text-align: center; border-radius: 999px; border: 1px solid currentColor; font: 600 12px var(--mono); white-space: nowrap; }
@@ -1143,8 +1220,9 @@ a.trow:hover .jira-addchip, .jira-addchip:focus-visible { border: 1px dashed var
 .cov-card .note { font-size: 15px; }
 .cov-flags li { font-size: 16px; }
 .cov-jira .note { font-size: 15px; }
-.cov-repo-head h4 { font-size: 20px; color: hsl(50 95% 72%); }  /* yellow: the repository name, the same for both repositories */
-.cov-branch { font-size: 14px; }
+.cov-repo-head h4 { font-size: 20px; color: var(--repo-name); }  /* yellow: the repository name, the same for both repositories */
+.cov-branch { font-size: 13px; overflow-wrap: anywhere; white-space: normal; }  /* a chip (.br-chip.from), one per branch */
+.cov-branches-label { font-size: 13px; color: var(--muted); }
 .cov-chip { font-size: 14px; padding: 2px 11px; }
 .cov-meta { font-size: 14px; }
 .cov-commits { font-size: 15px; min-width: 720px; }
@@ -1160,47 +1238,82 @@ a.trow:hover .jira-addchip, .jira-addchip:focus-visible { border: 1px dashed var
 /* ---- Coverage page layout (everything outside the ticket cards) ---- */
 .cov-page { width: 100%; }
 
-.cov-page-head { display: flex; align-items: center; justify-content: flex-start; gap: 14px; margin-bottom: 20px; }
+.cov-page-head { display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: 10px 14px; margin-bottom: 14px; }
 .cov-page-head .btn { padding: 9px 18px; font-size: 15px; }
-.cov-stamp { font-size: 14px; color: var(--muted); }
-.cov-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 22px; }
-.cov-tile { padding: 14px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
-.cov-tile-value { font: 700 36px/1.1 var(--mono); }
-.cov-tile-label { margin-top: 4px; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
-.cov-tile.bad .cov-tile-value { color: var(--blocked); }
-.cov-tile.good .cov-tile-value { color: var(--done); }
-.cov-tile.muted .cov-tile-value { color: var(--muted); }
+.stamp { font-size: 14px; color: var(--muted); }
 
-.cov-controls { display: flex; justify-content: space-between; align-items: center; gap: 12px 20px; flex-wrap: wrap; margin-bottom: 34px; }
-.cov-segmented { display: inline-flex; padding: 3px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; }
-.cov-seg { display: inline-flex; align-items: center; gap: 8px; padding: 7px 16px; font: 600 15px var(--font); color: var(--muted); background: transparent; border: 0; border-radius: 999px; cursor: pointer; }
-.cov-seg:hover { color: var(--ink); }
-.cov-seg.on { color: var(--on-accent); background: var(--accent); }
-.cov-seg .n { font-family: var(--mono); font-size: 13px; padding: 0 7px; border-radius: 999px; background: rgba(0, 0, 0, 0.18); }
-.cov-seg.on .n { background: rgba(10, 26, 51, 0.2); }
 .cov-info { display: flex; gap: 8px; flex-wrap: wrap; }
 .cov-info-chip { padding: 4px 12px; font-size: 14px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; }
 .cov-info-chip strong { font-weight: 600; color: var(--ink); }
 .cov-empty { padding: 40px 0; text-align: center; font-size: 17px; color: var(--muted); }
 
-/* A section: a heading with a short rule, then its tickets. Not a card, so it never looks like one. */
-.cov-section { margin-bottom: 44px; }
-.cov-section > summary.cov-section-head { display: block; list-style: none; cursor: pointer; margin-bottom: 18px; }
-.cov-section > summary.cov-section-head::-webkit-details-marker { display: none; }
-.cov-section-top { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-.cov-section-top::before { content: "\25B8"; width: 18px; color: var(--muted); font-size: 18px; }
-.cov-section[open] .cov-section-top::before { content: "\25BE"; }
-.cov-section-title { font-size: 26px; font-weight: 700; letter-spacing: -0.015em; }
-.cov-section-top .count { padding: 1px 12px; font: 600 16px var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 999px; }
-.cov-section-top .badge { padding: 2px 12px; font-size: 14px; }
-.cov-section-top .note { font-size: 15px; color: var(--done); }
-.cov-hint { margin: 6px 0 0 30px; max-width: 90ch; font-size: 15px; line-height: 1.5; color: var(--muted); }
-.cov-section.needs .cov-section-title { color: var(--ink); }
-@media (max-width: 720px) {
-  .cov-summary { grid-template-columns: 1fr; }
-  .cov-hint { margin-left: 0; }
+/* Master-detail: stage tiles filter a compact ticket list; the selected ticket opens on the right. */
+.cov-tiles { display: flex; flex-wrap: wrap; gap: 8px; }
+.cov-tile { display: inline-flex; align-items: baseline; gap: 8px; padding: 4px 14px; font: inherit; text-align: left; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); cursor: pointer; }
+.cov-tile strong { font-size: 18px; font-weight: 600; line-height: 1.1; }
+.cov-tile span { font-size: 13px; color: var(--muted); }
+.cov-tile.attn:not(.zero) strong { color: var(--blocked); }
+.cov-tile.zero { opacity: 0.6; }
+.cov-tile:hover { border-color: var(--accent); }
+.cov-tile.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.cov-layout { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.5fr); gap: 16px; align-items: stretch; }
+.cov-side { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow);
+  min-height: 0; overflow: hidden; }
+.cov-search { margin: 10px; width: auto; font-size: 14px; }
+.cov-list { flex: 1; min-height: 0; overflow-y: auto; border-top: 1px solid var(--line); }
+.cov-gh { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 12px; font: 600 12px var(--font); letter-spacing: 0.05em; text-transform: uppercase; text-align: left;
+  color: var(--muted); background: var(--surface-2); border: 0; border-bottom: 1px solid var(--line); }
+button.cov-gh { cursor: pointer; }
+button.cov-gh:hover { color: var(--ink); }
+.cov-gh.attn { color: var(--blocked); }
+.cov-gh .count { padding: 0 8px; font: 600 11px var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 999px; background: var(--surface); }
+.cov-gh .cov-fold { margin-left: auto; }
+.cov-li { display: grid; grid-template-columns: 10px 52px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 12px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.cov-li:hover { background: var(--surface-2); }
+.cov-li.sel { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); box-shadow: inset 3px 0 0 var(--accent); }
+.cov-li:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cov-li-num { font: 600 14px var(--mono); color: var(--accent-ink); }
+.cov-li-main { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.cov-li-title { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cov-li .rail { margin: 0; gap: 2px; max-width: 170px; }
+.cov-li .rail span { height: 6px; border-radius: 1px; }
+.cov-li .badge { font-size: 12px; white-space: nowrap; }
+.cov-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--skipped); flex: none; }
+.cov-dot.s-dev { background: #7a4fe0; }
+.cov-dot.s-qa { background: #d98a00; }
+.cov-dot.s-qa_blocked { background: var(--blocked); }
+.cov-dot.s-approved { background: #0b66d6; }
+.cov-dot.s-live { background: var(--done); }
+.cov-detail { min-width: 0; min-height: 0; overflow-y: auto; padding: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+.cov-detail .cov-card { padding: 0; background: none; border: 0; box-shadow: none; }
+main:has(.cov-layout) { padding-bottom: 12px; }
+/* The ticket detail: a clear header, the flag as a callout, and a commit table that fits the panel. */
+.cov-detail .cov-head { padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--line); }
+.cov-detail .cov-card .issue { font-size: 24px; }
+.cov-detail .cov-card .cov-head .cov-title { flex: 0 1 auto; font-size: 20px; font-weight: 600; white-space: normal; }
+.cov-detail .cov-flags { margin: 0 0 12px; }
+.cov-detail .cov-flag { display: flex; align-items: center; gap: 10px; margin: 0; padding: 8px 12px; font-size: 15px; border-radius: var(--radius);
+  background: color-mix(in srgb, var(--progress) 12%, var(--surface)); border: 1px solid color-mix(in srgb, var(--progress) 40%, var(--line)); }
+.cov-detail .cov-flag.missing { background: color-mix(in srgb, var(--blocked) 12%, var(--surface)); border-color: color-mix(in srgb, var(--blocked) 45%, var(--line)); }
+.cov-detail .cov-repo { margin-top: 12px; padding: 12px 14px 8px; }
+.cov-detail .cov-commits { min-width: 0; font-size: 14px; }
+.cov-detail .cov-commits .c-sha { width: 118px; }
+.cov-detail .cov-commits .c-date { width: 104px; }
+.cov-detail .cov-commits .note { font-size: 13px; }
+.cov-detail .cov-commits .c-author { width: 104px; }
+.cov-detail .cov-commits .c-pill { width: 80px; }
+.cov-detail .cov-commits td { padding: 5px 8px; line-height: 1.35; }
+.cov-detail .cov-commits tbody tr + tr td { border-top: 1px solid color-mix(in srgb, var(--line) 55%, transparent); }
+.cov-detail .cov-pill { min-width: 62px; padding: 0 8px; font-size: 12px; }
+.cov-detail .cov-card { margin-bottom: 0; }
+.cov-stage-hint { margin: 10px 4px 0; font-size: 13px; }
+@media (max-width: 1000px) {
+  .cov-layout { grid-template-columns: minmax(0, 1fr); }
+  .cov-side { max-height: 50vh; }
+  .cov-detail { overflow: visible; }
 }
-.cov-head .open-tl { margin-left: 0; padding: 1px 8px; font-size: 14px; line-height: 20px; align-self: center; }
+.cov-head .open-tl { margin-left: 0; align-self: center; }
 
 /* On a wide enough screen the title row never wraps: a long title is cut with an ellipsis, so the Timeline and Jira
    chips stay on the first row and the flag message is always the second row. */
@@ -1209,6 +1322,8 @@ a.trow:hover .jira-addchip, .jira-addchip:focus-visible { border: 1px dashed var
   .cov-head > * { flex: none; }
   .cov-head > .cov-title { flex: 0 1 auto; min-width: 80px; }
   .cov-statuses { flex-wrap: nowrap; }
+  .cov-detail .cov-head { flex-wrap: wrap; }
+  .cov-detail .cov-statuses { flex-basis: 100%; margin-left: 0; flex-wrap: wrap; }
 }
 .cov-commits td:nth-last-child(-n+2) { overflow: visible; text-overflow: clip; }  /* the pills never get an ellipsis */
 /* The Show/Hide row folds the commits that are on QA and production: just a link-coloured label, no lines or fill. */
@@ -1282,3 +1397,131 @@ a.trow:hover .jira-addchip, .jira-addchip:focus-visible { border: 1px dashed var
 .jd-row .subtabs { margin-bottom: 14px; }
 .jd-rail { flex: 0 1 46%; min-width: 320px; margin-bottom: 14px; }
 .jd-rail .rail { margin-bottom: 0; }
+
+/* ---- day / night toggle: shows the moon at night, the sun by day ------ */
+.theme-toggle { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; background: transparent; border: 1px solid transparent; border-radius: 8px; color: var(--muted); cursor: pointer; }
+.theme-toggle:hover { color: var(--ink); background: var(--surface-2); border-color: var(--line); }
+.theme-toggle .icon-sun { display: none; }
+:root[data-theme="light"] .theme-toggle .icon-moon { display: none; }
+:root[data-theme="light"] .theme-toggle .icon-sun { display: block; }
+
+/* A split action: what is missing (left) and the PR that fixes it (right, filled). */
+.cov-act { --tone: var(--blocked); display: inline-flex; align-items: stretch; padding: 0; font: inherit; font-size: 12px; cursor: pointer;
+  border: 1px solid var(--tone); border-radius: 8px; overflow: hidden; background: var(--surface); color: var(--tone); }
+.cov-act.warn { --tone: var(--progress); }
+.cov-act-info { display: inline-flex; align-items: baseline; gap: 6px; padding: 4px 10px; }
+.cov-act-info strong { font-family: var(--mono); }
+.cov-act-go { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; background: var(--tone); color: var(--surface); font-weight: 600; }
+.cov-act:hover:not(:disabled) .cov-act-go { filter: brightness(1.12); }
+.cov-act:focus-visible { outline: 2px solid var(--tone); outline-offset: 2px; }
+.cov-act:disabled { cursor: progress; opacity: .6; }
+a.cov-act { text-decoration: none; }
+.cov-act.has-pr { --tone: var(--progress); cursor: pointer; }
+.cov-act.has-pr .cov-act-go { background: var(--surface-2); color: var(--tone); }
+.cov-act.has-pr:hover .cov-act-go { text-decoration: underline; }
+.cov-spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: cov-spin .7s linear infinite; flex: none; }
+@keyframes cov-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .cov-spin { animation: none; border-right-color: currentColor; border-style: dotted; } }
+.cov-act.checking { --tone: var(--muted); cursor: progress; }
+.cov-act.checking .cov-act-go { background: var(--surface-2); color: var(--tone); font-weight: 500; }
+.pr-checking { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.pr-dialog .pr-side > input, .pr-dialog .pr-main > textarea { margin-top: 0; }
+/* The changes box is as tall as its content and scrolls only when the dialog is too short. */
+.pr-side { display: flex; flex-direction: column; min-height: 0; }
+.pr-side .pr-findings { flex: 0 1 auto; min-height: 0; overflow-y: auto; margin-bottom: 4px; }
+.pr-side .pr-findings[hidden] { display: none; }
+
+/* Ready for QA / Ready for Release: the usual card list, with a "PR created" pane below it */
+.jira-col.split { overflow-y: auto; gap: 8px; }
+.jira-main { flex: none; min-height: 12px; display: flex; flex-direction: column; gap: 8px; border-radius: 6px; transition: background 0.1s, box-shadow 0.1s; }
+.jira-main.drop { background: color-mix(in srgb, var(--accent) 12%, transparent); box-shadow: 0 0 0 1px var(--accent); }
+.jira-sub { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 0 8px 8px;
+  background: color-mix(in srgb, var(--done) 9%, transparent); border: 1px solid color-mix(in srgb, var(--done) 55%, var(--line)); border-radius: var(--radius);
+  transition: border-color 0.1s, background 0.1s, box-shadow 0.1s; }
+.jira-sub h3 { margin: 0 -8px; padding: 7px 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; white-space: nowrap;
+  color: var(--done); background: color-mix(in srgb, var(--done) 18%, var(--surface)); border-bottom: 1px solid color-mix(in srgb, var(--done) 55%, var(--line));
+  border-radius: var(--radius) var(--radius) 0 0; display: flex; align-items: center; gap: 6px; }
+.jira-sub h3::before { content: "✓"; }
+.jira-sub h3 .pill { margin-left: auto; color: var(--done); border-color: var(--done); }
+.jira-sub .jira-empty { display: flex; align-items: center; justify-content: center; text-align: center; min-height: 44px; padding: 4px 8px;
+  font-size: 11px; color: var(--muted); border: 1px dashed var(--line); border-radius: 6px; opacity: 0.7; }
+.jira-sub.drop { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--surface)); box-shadow: 0 0 0 1px var(--accent); }
+.jira-col.split.drop, .jira-col.split:hover { box-shadow: none; background: color-mix(in srgb, var(--surface) 55%, var(--bg)); }
+
+/* The commit table lines up with the panel header: the sha starts under the repository name and the Prod pill ends under the
+   right-hand chip. The red edge of a missing commit is drawn in the wrap's left padding, outside the text column. */
+.cov-table-wrap { padding-left: 8px; margin-left: -8px; }
+.cov-commits tbody td:first-child { padding-left: 0; }
+.cov-commits tbody td:last-child { padding-right: 0; }
+.cov-commits tr.missing td:first-child { box-shadow: -4px 0 0 var(--blocked); }
+.cov-commits tbody td:nth-last-child(-n+2) { text-align: right; }
+/* Second header row: the "newest commit" note on the left, the QA / production chips on the right; they wrap together, never leaving a gap above. */
+.cov-sub { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin: 8px 0 6px; }
+.cov-sub .cov-meta { margin: 0; }
+.cov-sub .cov-chips { margin-left: 0; }
+/* Second row on every repository panel: a short "last seen" note on the left, the QA / production chips on the right. */
+.cov-sub { flex-wrap: nowrap; align-items: center; justify-content: space-between; gap: 12px; }
+.cov-sub .cov-meta { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cov-sub .cov-chips { flex: none; margin-left: auto; flex-wrap: nowrap; }
+
+/* Jira status on the task page header: always show the "+ Add" chip next to "Not on Jira board" */
+.jira-head { display: inline-flex; align-items: center; gap: 6px; }
+.task-head .jira-edit.jira-addchip { width: auto; border: 1px dashed var(--line); color: var(--muted); }
+.task-head .jira-addchip .dash { display: none; }
+.task-head .jira-addchip .add { display: inline; }
+.task-head .jira-edit.jira-addchip:hover { border-color: var(--accent); color: var(--accent-ink); }
+.task-head .jira-edit { opacity: 1; }
+
+/* PR description: Write / Preview tabs like GitHub */
+.pr-tabs { display: flex; align-items: flex-end; gap: 4px; }
+.pr-tabs label { margin: 0 10px 4px 0; }
+.pr-tab { padding: 5px 12px; font: 600 13px var(--font); color: var(--muted); background: transparent; border: 1px solid transparent; border-bottom: 0; border-radius: var(--radius) var(--radius) 0 0; cursor: pointer; }
+.pr-tab[aria-selected="true"] { color: var(--ink); background: var(--bg); border-color: var(--line); position: relative; top: 1px; }
+.pr-main textarea[hidden], .pr-preview[hidden] { display: none; }
+.pr-preview { flex: 1; min-height: 200px; overflow: auto; box-sizing: border-box; margin-top: 4px; padding: 10px 14px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); font-size: 14px; line-height: 1.5; }
+.pr-preview .body.rich { white-space: normal; }
+.pr-preview .md-code { font: 12.5px var(--mono); white-space: pre; overflow: auto; margin: 8px 0; padding: 10px 12px; background: var(--surface-2); border-radius: var(--radius); }
+.pr-preview .md-h { margin: 14px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+.pr-bar { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: 4px; border-bottom: 1px solid var(--line); }
+.pr-bar + textarea, .pr-bar ~ .pr-preview { margin-top: 0; border-top: 0; border-radius: 0 0 var(--radius) var(--radius); }
+.pr-tab { margin-bottom: -1px; }
+.pr-tab[aria-selected="true"] { top: 0; border-bottom: 1px solid var(--bg); }
+.pr-tools { display: flex; align-items: center; gap: 2px; padding-bottom: 3px; }
+.pr-tools[hidden] { display: none; }
+.pr-tool { min-width: 28px; height: 26px; padding: 0 6px; font: 600 13px var(--font); color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: 6px; cursor: pointer; }
+.pr-tool:hover, .pr-tool:focus-visible { color: var(--accent-ink); background: var(--surface-2); border-color: var(--line); }
+.pr-preview .body.rich { padding: 0; border: 0; background: none; }
+
+/* ---- PR dialog, redesigned: header, route card, one editor card, sticky footer ---- */
+dialog.pr-dialog form { padding: 0; }
+.pr-dialog header { padding: 16px 24px; border-bottom: 1px solid var(--line); align-items: center; }
+.pr-heading { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pr-dialog h2 { font-size: 18px; letter-spacing: -0.01em; }
+.pr-chip { padding: 2px 10px; font: 600 12px var(--font); border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: var(--muted); }
+.pr-chip.repo { font-family: var(--mono); color: var(--repo-name); }
+.pr-chip.issue { font-family: var(--mono); color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
+.pr-dialog .tl-dialog-x { width: 32px; height: 32px; border-radius: 8px; }
+.pr-dialog .tl-dialog-x:hover { background: var(--surface-2); }
+.pr-intro { margin: 0; padding: 10px 24px; font-size: 13px; background: color-mix(in srgb, var(--accent) 8%, transparent); border-bottom: 1px solid var(--line); }
+.pr-route { margin: 16px 24px 0; padding: 12px 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; align-items: flex-end; }
+.pr-dialog .pr-route select { background: var(--surface); }
+.pr-route-arrow { color: var(--accent-ink); font-size: 18px; }
+.pr-route-to .br-chip { padding: 0 14px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent-ink); font-weight: 600; }
+.pr-dialog .pr-grid { margin: 0; padding: 4px 24px 16px; gap: 28px; }
+.pr-dialog .pr-desc-head { margin-top: 14px; min-height: 30px; }
+.pr-dialog .pr-desc-head label, .pr-dialog .pr-route label { margin: 0 0 4px; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.pr-dialog #pr-title { margin-top: 0; padding: 9px 12px; font-size: 15px; font-weight: 600; }
+.pr-desc-head .btn { color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.pr-desc-head .btn:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.pr-editor { flex: 1; min-height: 0; display: flex; flex-direction: column; margin-top: 4px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--bg); }
+.pr-editor:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent); }
+.pr-editor .pr-bar { margin: 0; padding: 6px 8px 0; background: var(--surface-2); border-bottom: 1px solid var(--line); }
+.pr-editor .pr-tab { padding: 7px 14px; margin-bottom: -1px; }
+.pr-editor .pr-tab[aria-selected="true"] { background: var(--bg); border-color: var(--line); border-bottom-color: var(--bg); }
+.pr-editor .pr-tools { padding-bottom: 5px; }
+.pr-dialog .pr-editor textarea, .pr-dialog .pr-editor .pr-preview { margin: 0; border: 0; border-radius: 0; box-shadow: none; flex: 1; min-height: 240px; padding: 14px 16px; background: var(--bg); resize: none; line-height: 1.6; }
+.pr-dialog .pr-editor textarea:focus { box-shadow: none; }
+.pr-ai-note { margin: 8px 2px 0; }
+.pr-dialog footer { margin: 0; padding: 12px 24px; align-items: center; background: var(--surface); }
+.pr-hint { margin-right: auto; font-size: 12.5px; color: var(--muted); }
+.pr-dialog footer .btn { padding: 8px 18px; }

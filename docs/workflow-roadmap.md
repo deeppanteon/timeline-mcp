@@ -123,11 +123,11 @@ intake → estimate (optional) → develop (repeats) → review → release_qa
 |---|---|---|---|---|---|
 | intake | Intake | run | timeline-intake | task.md, analysis.md, progress.md | analysis.md is right, questions answered |
 | estimate | Estimate | run, optional | timeline-estimate | analysis.md Time Analysis | the hours |
-| develop | Develop | run, repeat, needs analysis, checks blocked | timeline-progress (dev) + specialist | one step's code, one progress row, one commit | this step's change and commit |
+| develop | Develop | run, repeat, needs analysis, checks blocked | timeline-progress (dev) + specialist | one step's code, one progress row, no commit unless you confirm | this step's change |
 | review | Self-review | run, needs analysis | upgrade-verification | review.md | review right, findings handled |
 | release_qa | Release to QA | run, needs analysis | timeline-release qa | release-note.md section, qa-plan.md | release note and QA plan |
 | qa | Waiting on QA | decision | — | — | QA found issues / QA approved |
-| qa_fix | Fix QA findings | run, repeat, needs analysis, checks blocked | timeline-progress (qa-fix) + specialist | one finding's fix, one row, one commit | this finding's fix |
+| qa_fix | Fix QA findings | run, repeat, needs analysis, checks blocked | timeline-progress (qa-fix) + specialist | one finding's fix, one row, no commit unless you confirm | this finding's fix |
 | release_prod | Release to prod | run, needs analysis | timeline-release prod | release-note.md section | the prod release note |
 | close | Close | decision | — | — | the task is done |
 
